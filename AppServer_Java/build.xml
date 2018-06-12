@@ -5,8 +5,8 @@
   <property name="gae_version" value="1.8.4" />
   <property name="gae_org" location="appengine-java-sdk-${gae_version}" />
   <property name="gae_dist" location="appengine-java-sdk-repacked" />
-  <property name="java_source_version" location="1.7" />
-  <property name="java_target_version" location="${java_source_version}" />
+  <property name="java_source_version" value="1.7" />
+  <property name="java_target_version" value="${java_source_version}" />
 
   <path id="gae.classpath">
     <fileset dir="${gae_dist}/lib">
