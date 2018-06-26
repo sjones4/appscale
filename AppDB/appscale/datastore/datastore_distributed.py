@@ -5,7 +5,6 @@ import logging
 import md5
 import random
 import sys
-import threading
 import time
 
 from tornado import gen
@@ -16,10 +15,14 @@ from appscale.datastore import dbconstants, helper_functions
 from appscale.common.unpackaged import APPSCALE_PYTHON_APPSERVER
 from kazoo.client import KazooState
 from appscale.datastore.dbconstants import (
-  APP_ENTITY_SCHEMA, ID_KEY_LENGTH, MAX_TX_DURATION, Timeout
+  APP_ENTITY_SCHEMA, ID_KEY_LENGTH, InternalError,
+  MAX_TX_DURATION, Timeout
 )
+from appscale.datastore.cassandra_env.cassandra_interface import (
+  batch_size, LARGE_BATCH_THRESHOLD)
 from appscale.datastore.cassandra_env.entity_id_allocator import EntityIDAllocator
 from appscale.datastore.cassandra_env.entity_id_allocator import ScatteredAllocator
+from appscale.datastore.cassandra_env.large_batch import BatchNotApplied
 from appscale.datastore.cassandra_env.utils import deletions_for_entity
 from appscale.datastore.cassandra_env.utils import mutations_for_entity
 from appscale.datastore.taskqueue_client import EnqueueError, TaskQueueClient
@@ -39,7 +42,6 @@ from appscale.datastore.zkappscale import entity_lock
 from appscale.datastore.zkappscale import zktransaction
 
 sys.path.append(APPSCALE_PYTHON_APPSERVER)
-from google.appengine.api import api_base_pb
 from google.appengine.api import datastore_errors
 from google.appengine.api.datastore_distributed import _MAX_ACTIONS_PER_TXN
 from google.appengine.datastore import appscale_stub_util
@@ -570,8 +572,13 @@ class DatastoreDistributed():
         entity_keys = [
           get_entity_key(self.get_table_prefix(entity), entity.key().path())
           for entity in entity_list]
-        current_values = yield self.datastore_batch.batch_get_entity(
-          dbconstants.APP_ENTITY_TABLE, entity_keys, APP_ENTITY_SCHEMA)
+        try:
+          current_values = yield self.datastore_batch.batch_get_entity(
+            dbconstants.APP_ENTITY_TABLE, entity_keys, APP_ENTITY_SCHEMA)
+        except dbconstants.AppScaleDBConnectionError:
+          lock.release()
+          self.transaction_manager.delete_transaction_id(app, txid)
+          raise
 
         batch = []
         entity_changes = []
@@ -593,8 +600,27 @@ class DatastoreDistributed():
 
           entity_changes.append(
             {'key': entity.key(), 'old': current_value, 'new': entity})
-        yield self.datastore_batch.batch_mutate(
-          app, batch, entity_changes, txid)
+
+        if batch_size(batch) > LARGE_BATCH_THRESHOLD:
+          try:
+            yield self.datastore_batch.large_batch(app, batch, entity_changes,
+                                                   txid)
+          except BatchNotApplied as error:
+            # If the "applied" switch has not been flipped, the lock can be
+            # released. The transaction ID is kept so that the groomer can
+            # clean up the batch tables.
+            lock.release()
+            raise dbconstants.AppScaleDBConnectionError(str(error))
+        else:
+          try:
+            yield self.datastore_batch.normal_batch(batch, txid)
+          except dbconstants.AppScaleDBConnectionError:
+            # Since normal batches are guaranteed to be atomic, the lock can
+            # be released.
+            lock.release()
+            self.transaction_manager.delete_transaction_id(app, txid)
+            raise
+
         lock.release()
 
       finally:
@@ -636,7 +662,7 @@ class DatastoreDistributed():
                     'key': bytearray(group.Encode()),
                     'last_update': txid})
 
-      yield self.datastore_batch._normal_batch(batch, txid)
+      yield self.datastore_batch.normal_batch(batch, txid)
 
   @gen.coroutine
   def dynamic_put(self, app_id, put_request, put_response):
@@ -3233,7 +3259,15 @@ class DatastoreDistributed():
       raise Timeout('Unable to acquire entity group locks')
 
     try:
-      group_txids = yield self.datastore_batch.group_updates(metadata['reads'])
+      try:
+        group_txids = yield self.datastore_batch.group_updates(
+          metadata['reads'])
+      except dbconstants.TRANSIENT_CASSANDRA_ERRORS:
+        lock.release()
+        self.transaction_manager.delete_transaction_id(app, txn)
+        raise dbconstants.AppScaleDBConnectionError(
+          'Unable to fetch group updates')
+
       for group_txid in group_txids:
         if group_txid in metadata['in_progress'] or group_txid > txn:
           lock.release()
@@ -3246,8 +3280,13 @@ class DatastoreDistributed():
                            for key, _ in metadata['puts'].iteritems()]
       entity_table_keys.extend([encode_entity_table_key(key)
                                 for key in metadata['deletes']])
-      current_values = yield self.datastore_batch.batch_get_entity(
-        dbconstants.APP_ENTITY_TABLE, entity_table_keys, APP_ENTITY_SCHEMA)
+      try:
+        current_values = yield self.datastore_batch.batch_get_entity(
+          dbconstants.APP_ENTITY_TABLE, entity_table_keys, APP_ENTITY_SCHEMA)
+      except dbconstants.AppScaleDBConnectionError:
+        lock.release()
+        self.transaction_manager.delete_transaction_id(app, txn)
+        raise
 
       batch = []
       entity_changes = []
@@ -3285,7 +3324,26 @@ class DatastoreDistributed():
           {'table': 'group_updates', 'key': bytearray(group),
            'last_update': txn})
 
-      yield self.datastore_batch.batch_mutate(app, batch, entity_changes, txn)
+      if batch_size(batch) > LARGE_BATCH_THRESHOLD:
+        try:
+          yield self.datastore_batch.large_batch(app, batch, entity_changes,
+                                                 txn)
+        except BatchNotApplied as error:
+          # If the "applied" switch has not been flipped, the lock can be
+          # released. The transaction ID is kept so that the groomer can
+          # clean up the batch tables.
+          lock.release()
+          raise dbconstants.AppScaleDBConnectionError(str(error))
+      else:
+        try:
+          yield self.datastore_batch.normal_batch(batch, txn)
+        except dbconstants.AppScaleDBConnectionError:
+          # Since normal batches are guaranteed to be atomic, the lock can
+          # be released.
+          lock.release()
+          self.transaction_manager.delete_transaction_id(app, txn)
+          raise
+
       lock.release()
 
     finally:
@@ -3333,24 +3391,21 @@ class DatastoreDistributed():
     commitres_pb = datastore_pb.CommitResponse()
     raise gen.Return((commitres_pb.Encode(), 0, ''))
 
-  def rollback_transaction(self, app_id, http_request_data):
+  def rollback_transaction(self, app_id, txid):
     """ Handles the rollback phase of a transaction.
 
     Args:
       app_id: The application ID requesting the rollback.
-      http_request_data: The encoded request, a datstore_pb.Transaction.
-    Returns:
-      An encoded protocol buffer void response.
+      txid: An integer specifying a transaction ID.
+    Raises:
+      InternalError if unable to roll back transaction.
     """
-    txn = datastore_pb.Transaction(http_request_data)
     self.logger.info(
-      'Doing a rollback on transaction {} for {}'.format(txn.handle(), app_id))
+      'Doing a rollback on transaction {} for {}'.format(txid, app_id))
     try:
-      self.zookeeper.notify_failed_transaction(app_id, txn.handle())
-      return api_base_pb.VoidProto().Encode(), 0, ''
-    except zktransaction.ZKTransactionException as zkte:
-      self.logger.exception('Unable to rollback {} for {}'.format(txn, app_id))
-      return '', datastore_pb.Error.PERMISSION_DENIED, str(zkte)
+      self.zookeeper.notify_failed_transaction(app_id, txid)
+    except zktransaction.ZKTransactionException as error:
+      raise InternalError(str(error))
 
   def _zk_state_listener(self, state):
     """ Handles changes to the ZooKeeper connection state.
