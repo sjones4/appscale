@@ -231,6 +231,7 @@ def extract_source(revision_key, location, runtime):
 
     if runtime == GO:
       try:
+        shutil.rmtree(os.path.join(revision_base, 'gopath'), ignore_errors=True)
         shutil.move(os.path.join(app_path, 'gopath'), revision_base)
       except IOError:
         logger.debug(
