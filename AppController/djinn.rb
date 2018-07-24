@@ -3762,16 +3762,12 @@ class Djinn
       return
     end
 
-    api_server_venv = File.join('/', 'opt', 'appscale_api_server')
-    upgrade_package = "source #{api_server_venv}/bin/activate && " \
-      "pip install --upgrade --no-deps #{src} > /dev/null 2>&1"
-    unless system("bash -c '#{upgrade_package}'")
+    unless system("pip install --upgrade --no-deps #{src} > /dev/null 2>&1")
       Djinn.log_error('Unable to build APIServer (install failed).')
       return
     end
-    upgrade_deps = "source #{api_server_venv}/bin/activate && " \
-      "pip install #{src} > /dev/null 2>&1"
-    unless system("bash -c '#{upgrade_deps}'")
+
+    unless system("pip install #{src} > /dev/null 2>&1")
       Djinn.log_error(
         'Unable to build APIServer (install dependencies failed).')
       return
