@@ -60,7 +60,7 @@ def reference_property_to_reference(refprop):
   return ref
 
 
-class UnprocessedQueryResult(datastore_pb.QueryResult):
+class UnprocessedQueryResult(appscale_stub_util.QueryResult):
   """ A QueryResult that avoids decoding and re-encoding results.
 
   This is only meant as a faster container for returning results from

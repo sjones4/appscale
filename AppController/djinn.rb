@@ -3739,6 +3739,29 @@ class Djinn
     Djinn.log_info('Finished building Hermes.')
   end
 
+  def build_app_server
+    Djinn.log_info('Building uncommitted AppServer changes')
+    src = File.join(APPSCALE_HOME, 'AppServer')
+    proto_dest = File.join(src, 'google', 'appengine', 'datastore')
+    unless system("protoc --proto_path=#{src} --python_out=#{proto_dest} " \
+                  "#{src}/datastore_v3.proto")
+      Djinn.log_error('Unable to compile AppServer proto files')
+      return
+    end
+
+    unless system("pip install --upgrade --no-deps #{src} > /dev/null 2>&1")
+      Djinn.log_error('Unable to build AppServer (install failed).')
+      return
+    end
+
+    unless system("pip install #{src} > /dev/null 2>&1")
+      Djinn.log_error(
+          'Unable to build AppServer (install dependencies failed).')
+      return
+    end
+    Djinn.log_info('Finished building AppServer.')
+  end
+
   def build_api_server
     Djinn.log_info('Building uncommitted APIServer changes')
     src = File.join(APPSCALE_HOME, 'APIServer')
@@ -3772,6 +3795,7 @@ class Djinn
     build_common if status.include?('common')
     build_java_appserver if status.include?('AppServer_Java')
     build_hermes if status.include?('Hermes')
+    build_app_server if status.include?('AppServer')
     build_api_server if status.include?('APIServer')
   end
 
