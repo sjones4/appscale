@@ -624,14 +624,6 @@ installdatastore()
 
 installapiserver()
 {
-    (cd APIServer && protoc --python_out=./appscale/api_server *.proto)
-    # This package needs to be installed in a virtualenv because the protobuf
-    # library conflicts with the google namespace in the SDK.
-    rm -rf /opt/appscale_api_server
-    virtualenv /opt/appscale_api_server
-
-    # The activate script fails under `set -u`.
-    unset_opt=$(shopt -po nounset)
     case ${DIST} in
         wheezy|trusty)
             # Tornado 5 does not work with Python<2.7.9.
@@ -642,13 +634,11 @@ installapiserver()
             ;;
     esac
 
-    set +u
-    (source /opt/appscale_api_server/bin/activate && \
-     pip install -U pip && \
-     pip install "${tornado_package}" && \
-     pip install ${APPSCALE_HOME}/AppControllerClient ${APPSCALE_HOME}/common \
-     ${APPSCALE_HOME}/APIServer)
-    eval ${unset_opt}
+    pip install "${tornado_package}"
+
+    (cd ${APPSCALE_HOME}/APIServer && protoc --python_out=./appscale/api_server *.proto)
+    pip install --upgrade --no-deps ${APPSCALE_HOME}/APIServer
+    pip install ${APPSCALE_HOME}/APIServer
 }
 
 prepdashboard()
