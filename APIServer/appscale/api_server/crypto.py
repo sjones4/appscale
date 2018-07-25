@@ -3,9 +3,11 @@
 import base64
 import datetime
 import json
+import os
 import time
 
 import six
+from cryptography import utils
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -108,7 +110,12 @@ class PrivateKey(object):
         Returns:
             A binary type containing the signed payload.
         """
-        return self.key.sign(blob, self.PADDING, hashes.SHA256())
+        try:
+            return self.key.sign(blob, self.PADDING, hashes.SHA256())
+        except AttributeError:  # fallback for cryptography < 1.4
+            signer = self.key.signer(self.PADDING, hashes.SHA256())
+            signer.update(blob)
+            return signer.finalize()
 
     def to_json(self):
         """ Serializes the key details as JSON.
@@ -220,11 +227,13 @@ class PublicCertificate(object):
         issuer = x509.Name(
             [x509.NameAttribute(NameOID.COMMON_NAME, u'AppScale')])
 
+        # use x509.random_serial_number() rather than utils.int_from_bytes ...
+        # when we can require crypto >= 1.6
         cert = x509.CertificateBuilder().\
             subject_name(subject).\
             issuer_name(issuer).\
             public_key(private_key.key.public_key()).\
-            serial_number(x509.random_serial_number()).\
+            serial_number(utils.int_from_bytes(os.urandom(20), "big") >> 1).\
             not_valid_before(datetime.datetime.utcnow()).\
             not_valid_after(datetime.datetime.utcnow() + CERTIFICATE_TTL).\
             sign(private_key.key, hashes.SHA256(), default_backend())
