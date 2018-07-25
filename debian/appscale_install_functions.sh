@@ -184,14 +184,6 @@ export EC2_PRIVATE_KEY=${CONFIG_DIR}/certs/mykey.pem
 export EC2_CERT=${CONFIG_DIR}/certs/mycert.pem
 export LC_ALL='en_US.UTF-8'
 EOF
-# This enables to load AppServer and AppDB modules. It must be before the python-support.
-    DESTFILE=${DESTDIR}/usr/lib/python2.7/dist-packages/appscale_appserver.pth
-    mkdir -pv $(dirname $DESTFILE)
-    echo "Generating $DESTFILE"
-    cat <<EOF | tee $DESTFILE
-${APPSCALE_HOME_RUNTIME}/AppDB
-${APPSCALE_HOME_RUNTIME}/AppServer
-EOF
 # Enable to load site-packages of Python.
     DESTFILE=${DESTDIR}/usr/local/lib/python2.7/dist-packages/site_packages.pth
     mkdir -pv $(dirname $DESTFILE)
@@ -241,6 +233,12 @@ installjavajdk()
 {
     # This sets the default JVM.
     update-alternatives --set java ${JAVA_HOME_DIRECTORY}/jre/bin/java
+}
+
+installappserverpython()
+{
+    pip install --upgrade --no-deps ${APPSCALE_HOME}/AppServer
+    pip install ${APPSCALE_HOME}/AppServer
 }
 
 installappserverjava()
