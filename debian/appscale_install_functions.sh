@@ -237,6 +237,8 @@ installjavajdk()
 
 installappserverpython()
 {
+    (cd ${APPSCALE_HOME}/AppServer && \
+      protoc --python_out=./google/appengine/datastore/ datastore_v3.proto)
     pip install --upgrade --no-deps ${APPSCALE_HOME}/AppServer
     pip install ${APPSCALE_HOME}/AppServer
 }
