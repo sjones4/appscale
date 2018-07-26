@@ -64,8 +64,10 @@ module MonitInterface
     config = <<CONFIG
 CHECK PROCESS #{watch} PIDFILE "#{pidfile}"
   group #{watch}
+  group appscale
   start program = "#{start_cmd}" #{timeout_suffix}
   stop program = "#{stop_cmd}"
+  onreboot nostart
 CONFIG
 
     monit_file = "#{MONIT_CONFIG}/appscale-#{watch}.cfg"
@@ -80,8 +82,10 @@ CONFIG
     config = <<CONFIG
 CHECK PROCESS #{watch} MATCHING "#{match_cmd}"
   group #{watch}
+  group appscale
   start program = "#{start_cmd}"
   stop program = "#{stop_cmd}"
+  onreboot nostart
 CONFIG
 
     monit_file = "#{MONIT_CONFIG}/appscale-#{watch}.cfg"
@@ -173,8 +177,10 @@ CONFIG
     contents = <<BOO
 CHECK PROCESS #{process_name} PIDFILE "#{pidfile}"
   group #{group}
+  group appscale
   start program = "#{start_stop_daemon} #{start_args.join(' ')}"
   stop program = "#{bash} -c '#{stop_cmd}'"
+  onreboot nostart
 BOO
 
     # If we have a valid 'mem' option, set the max memory for this
