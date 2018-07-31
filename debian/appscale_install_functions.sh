@@ -184,6 +184,21 @@ export EC2_PRIVATE_KEY=${CONFIG_DIR}/certs/mykey.pem
 export EC2_CERT=${CONFIG_DIR}/certs/mycert.pem
 export LC_ALL='en_US.UTF-8'
 EOF
+    # This enables to load AppServer and AppDB modules. It must be before the python-support.
+    DESTFILE=${DESTDIR}/usr/lib/python2.7/dist-packages/appscale_appserver.pth
+    mkdir -pv $(dirname $DESTFILE)
+    echo "Generating $DESTFILE"
+    cat <<EOF | tee $DESTFILE
+${APPSCALE_HOME_RUNTIME}/AppDB
+${APPSCALE_HOME_RUNTIME}/AppServer
+EOF
+    # Ensure google namespace is set up even if appengine packages are imported first
+    DESTFILE=${DESTDIR}/usr/lib/python2.7/dist-packages/appscale_google_appengine.pth
+    mkdir -pv $(dirname $DESTFILE)
+    echo "Generating $DESTFILE"
+    cat <<EOF | tee $DESTFILE
+import google.protobuf; import google; import pkgutil; pkgutil.extend_path(google.__path__, google.__name__)
+EOF
 # Enable to load site-packages of Python.
     DESTFILE=${DESTDIR}/usr/local/lib/python2.7/dist-packages/site_packages.pth
     mkdir -pv $(dirname $DESTFILE)
@@ -239,8 +254,6 @@ installappserverpython()
 {
     (cd ${APPSCALE_HOME}/AppServer && \
       protoc --python_out=./google/appengine/datastore/ datastore_v3.proto)
-    pip install --upgrade --no-deps ${APPSCALE_HOME}/AppServer
-    pip install ${APPSCALE_HOME}/AppServer
 }
 
 installappserverjava()
