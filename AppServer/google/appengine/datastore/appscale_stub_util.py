@@ -68,7 +68,7 @@ def _GetScatterProperty(entity_proto):
     have a scatter property.
   """
   hash_obj = _MD5_FUNC()
-  for element in entity_proto.key().path().element_list():
+  for element in entity_proto.key.path.element_list():
     if element.has_name():
       hash_obj.update(element.name())
     elif element.has_id():
@@ -179,13 +179,13 @@ def ValidateQuery(query, filters, orders, max_query_components):
                ' + sort orders ancestor total' % max_query_components)
 
   if query.has_ancestor():
-    ancestor = query.ancestor()
-    if query.app() != ancestor.app():
+    ancestor = query.ancestor
+    if query.app != ancestor.app:
       BadRequest('query app is %s but ancestor app is %s' %
-                 (query.app(), ancestor.app()))
-    if query.name_space() != ancestor.name_space():
+                 (query.app, ancestor.app))
+    if query.name_space != ancestor.name_space:
       BadRequest('query namespace is %s but ancestor namespace is %s' %
-                 (query.name_space(), ancestor.name_space()))
+                 (query.name_space, ancestor.name_space))
 
 
 
@@ -205,14 +205,14 @@ def ValidateQuery(query, filters, orders, max_query_components):
       if not prop.value().has_referencevalue():
         BadRequest('%s filter value must be a Key' % key_prop_name)
       ref_val = prop.value().referencevalue()
-      if ref_val.app() != query.app():
+      if ref_val.app() != query.app:
         BadRequest('%s filter app is %s but query app is %s' %
-                   (key_prop_name, ref_val.app(), query.app()))
-      if ref_val.name_space() != query.name_space():
+                   (key_prop_name, ref_val.app(), query.app))
+      if ref_val.name_space() != query.name_space:
         BadRequest('%s filter namespace is %s but query namespace is %s' %
-                   (key_prop_name, ref_val.name_space(), query.name_space()))
+                   (key_prop_name, ref_val.name_space(), query.name_space))
 
-    if (filter.op() in datastore_index.INEQUALITY_OPERATORS and
+    if (filter.op in datastore_index.INEQUALITY_OPERATORS and
         prop_name != unapplied_log_timestamp_us_name):
       if ineq_prop_name is None:
         ineq_prop_name = prop_name
@@ -222,7 +222,7 @@ def ValidateQuery(query, filters, orders, max_query_components):
 
   if ineq_prop_name is not None and orders:
 
-    first_order_prop = orders[0].property().decode('utf-8')
+    first_order_prop = orders[0].property.decode('utf-8')
     if first_order_prop != ineq_prop_name:
       BadRequest('The first sort property must be the same as the property '
                  'to which the inequality filter is applied.  In your query '
@@ -237,9 +237,9 @@ def ValidateQuery(query, filters, orders, max_query_components):
           prop_name != unapplied_log_timestamp_us_name):
         BadRequest('kind is required for non-__key__ filters')
     for order in orders:
-      prop_name = order.property().decode('utf-8')
+      prop_name = order.property.decode('utf-8')
       if not (prop_name == key_prop_name and
-              order.direction() is datastore_pb.Query_Order.ASCENDING):
+              order.direction is datastore_pb.Query_Order.ASCENDING):
         BadRequest('kind is required for all orders except __key__ ascending')
 
 
@@ -346,7 +346,7 @@ def ParseKeyFilteredQuery(filters, orders):
   key_range = ValueRange()
   key_prop = datastore_types._KEY_SPECIAL_PROPERTY
   for f in filters:
-    op = f.op()
+    op = f.op
     if not (f.property_size() == 1 and
             f.property(0).name() == key_prop and
             not (op == datastore_pb.Query_Filter.IN or
@@ -363,8 +363,8 @@ def ParseKeyFilteredQuery(filters, orders):
 
   remaining_orders = []
   for o in orders:
-    if not (o.direction() == datastore_pb.Query_Order.ASCENDING and
-            o.property() == datastore_types._KEY_SPECIAL_PROPERTY):
+    if not (o.direction == datastore_pb.Query_Order.ASCENDING and
+            o.property == datastore_types._KEY_SPECIAL_PROPERTY):
       remaining_orders.append(o)
     else:
       break
@@ -479,7 +479,7 @@ def ParsePropertyQuery(query, filters, orders):
   key_range.Remap(lambda x: _PropertyKeyToString(x, ''))
 
   if query.has_ancestor():
-    ancestor = datastore_types.Key._FromPb(query.ancestor())
+    ancestor = datastore_types.Key._FromPb(query.ancestor)
     ancestor_kind, ancestor_property = _PropertyKeyToString(ancestor, None)
 
 
@@ -555,8 +555,8 @@ def FillUser(property):
   Args:
     property: A Property which may have a user value.
   """
-  if property.value().has_uservalue():
-    uid = SynthesizeUserId(property.value().uservalue().email())
+  if property.value.has_uservalue():
+    uid = SynthesizeUserId(property.value.uservalue.email)
     if uid:
       property.mutable_value().mutable_uservalue().set_obfuscated_gaiaid(uid)
 
@@ -599,7 +599,7 @@ class BaseCursor(object):
 
   def PopulateCursor(self, query_result):
     """ Creates cursor for the given query result. """
-    if query_result.more_results():
+    if query_result.more_results:
       cursor = query_result.mutable_cursor()
       cursor.set_app(self.app)
       cursor.set_cursor(self.cursor)
@@ -1128,12 +1128,11 @@ class QueryCursor(object):
     if self.__results:
       last_result = self.__results[-1]
     elif self.__last_ent:
-      last_result = entity_pb.EntityProto()
-      last_result.ParseFromString(self.__last_ent)
+      last_result = entity_pb.EntityProto.FromString(self.__last_ent)
 
     if last_result is not None:
       position = compiled_cursor.add_position()
-      position.mutable_key().MergeFrom(last_result.key())
+      position.mutable_key().MergeFrom(last_result.key)
       for prop in last_result.property_list():
         if prop.name() in self.__order_property_names:
           indexvalue = position.add_indexvalue()
@@ -1180,29 +1179,29 @@ class ListCursor(BaseCursor):
     Args:
       query: the query request proto
     """
-    super(ListCursor, self).__init__(query.app())
+    super(ListCursor, self).__init__(query.app)
 
     self.__order_property_names = order_property_names(query)
-    if query.has_compiled_cursor() and query.compiled_cursor().position_list():
+    if query.has_compiled_cursor() and query.compiled_cursor.position_list():
       self.__last_result, _ = (self._DecodeCompiledCursor(
-          query.compiled_cursor()))
+          query.compiled_cursor))
     else:
       self.__last_result = None
 
     if query.has_end_compiled_cursor():
-      if query.end_compiled_cursor().position_list():
+      if query.end_compiled_cursor.position_list():
         self.__end_result, _ = self._DecodeCompiledCursor(
-            query.end_compiled_cursor())
+            query.end_compiled_cursor)
     else:
       self.__end_result = None
 
     self.__query = query
     self.__offset = 0
-    self.__count = query.limit()
+    self.__count = query.limit
 
 
-    self.keys_only = query.keys_only()
-    
+    self.keys_only = query.keys_only
+
   def _GetLastResult(self):
     """ Protected access to private member. """
     return self.__last_result
@@ -1257,14 +1256,14 @@ class ListCursor(BaseCursor):
     """
     assert len(compiled_cursor.position_list()) == 1
 
-    position = compiled_cursor.position(0)
+    position = compiled_cursor.position
 
 
 
 
     remaining_properties = self.__order_property_names.copy()
     cursor_entity = datastore_pb.EntityProto()
-    cursor_entity.mutable_key().CopyFrom(position.key())
+    cursor_entity.mutable_key().CopyFrom(position.key)
     for indexvalue in position.indexvalue_list():
       property = cursor_entity.add_property()
       property.set_name(indexvalue.property())
@@ -1275,7 +1274,7 @@ class ListCursor(BaseCursor):
           'Cursor does not match query: missing values for %r' %
           remaining_properties)
 
-    return (cursor_entity, position.start_inclusive())
+    return (cursor_entity, position.start_inclusive)
 
   def Count(self):
     """Counts results, up to the query's limit.
@@ -1298,5 +1297,5 @@ def CompareEntityPbByKey(a, b):
   Returns:
      <0 if a's key is before b's, =0 if they are the same key, and >0 otherwise.
   """
-  return cmp(datastore_types.Key._FromPb(a.key()),
-             datastore_types.Key._FromPb(b.key()))
+  return cmp(datastore_types.Key._FromPb(a.key),
+             datastore_types.Key._FromPb(b.key))
