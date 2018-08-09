@@ -189,18 +189,18 @@ class _EntityConverter(object):
       v4_key: an entity_v4_pb.Key to populate
     """
     v4_key.Clear()
-    if not v3_ref.app():
+    if not v3_ref.app:
       return
-    v4_key.mutable_partition_id().set_dataset_id(v3_ref.app())
-    if v3_ref.name_space():
-      v4_key.mutable_partition_id().set_namespace(v3_ref.name_space())
-    for v3_element in v3_ref.path().element_list():
+    v4_key.mutable_partition_id().set_dataset_id(v3_ref.app)
+    if v3_ref.name_space:
+      v4_key.mutable_partition_id().set_namespace(v3_ref.name_space)
+    for v3_element in v3_ref.path.element_list():  # type: entity_pb.Path_Element
       v4_element = v4_key.add_path_element()
-      v4_element.set_kind(v3_element.type())
+      v4_element.set_kind(v3_element.type)
       if v3_element.has_id():
-        v4_element.set_id(v3_element.id())
+        v4_element.set_id(v3_element.id)
       if v3_element.has_name():
-        v4_element.set_name(v3_element.name())
+        v4_element.set_name(v3_element.name)
 
   def v3_to_v4_keys(self, v3_refs):
     """Converts a list of v3 References to a list of v4 Keys.
@@ -242,9 +242,9 @@ class _EntityConverter(object):
     if v4_entity.has_key():
       v4_key = v4_entity.key()
       self.v4_to_v3_reference(v4_key, v3_entity.mutable_key())
-      v3_ref = v3_entity.key()
+      v3_ref = v3_entity.key
       if (self.__v3_reference_has_id_or_name(v3_ref)
-          or v3_ref.path().element_size() > 1):
+          or v3_ref.path.element_size() > 1):
         self.v3_reference_to_group(v3_ref, v3_entity.mutable_entity_group())
     else:
 
@@ -259,8 +259,8 @@ class _EntityConverter(object):
       v4_entity: an entity_v4_pb.Proto to populate
     """
     v4_entity.Clear()
-    self.v3_to_v4_key(v3_entity.key(), v4_entity.mutable_key())
-    if not v3_entity.key().has_app():
+    self.v3_to_v4_key(v3_entity.key, v4_entity.mutable_key())
+    if not v3_entity.key.has_app():
 
       v4_entity.clear_key()
 
@@ -268,10 +268,10 @@ class _EntityConverter(object):
 
 
     v4_properties = {}
-    for v3_property in v3_entity.property_list():
+    for v3_property in v3_entity.property_list():  # type: entity_pb.Property
       self.__add_v4_property_to_entity(v4_entity, v4_properties, v3_property,
                                        True)
-    for v3_property in v3_entity.raw_property_list():
+    for v3_property in v3_entity.raw_property_list():  # type: entity_pb.Property
       self.__add_v4_property_to_entity(v4_entity, v4_properties, v3_property,
                                        False)
 
@@ -328,11 +328,11 @@ class _EntityConverter(object):
       v4_value: an entity_v4_pb.Value to populate
     """
     v4_value.Clear()
-    v3_property_value = v3_property.value()
-    v3_meaning = v3_property.meaning()
+    v3_property_value = v3_property.value
+    v3_meaning = v3_property.meaning
     v3_uri_meaning = None
-    if v3_property.meaning_uri():
-      v3_uri_meaning = v3_property.meaning_uri()
+    if v3_property.meaning_uri:
+      v3_uri_meaning = v3_property.meaning_uri
 
     if not self.__is_v3_property_value_union_valid(v3_property_value):
 
@@ -374,7 +374,7 @@ class _EntityConverter(object):
     elif v3_property_value.has_referencevalue():
       v3_ref = entity_pb.Reference()
       self.__v3_reference_value_to_v3_reference(
-          v3_property_value.referencevalue(), v3_ref)
+          v3_property_value.referencevalue, v3_ref)
       self.v3_to_v4_key(v3_ref, v4_value.mutable_key_value())
     elif v3_property_value.has_stringvalue():
       if v3_meaning == entity_pb.Property.ENTITY_PROTO:
@@ -408,13 +408,13 @@ class _EntityConverter(object):
 
 
     elif v3_property_value.has_pointvalue():
-      self.__v3_to_v4_point_entity(v3_property_value.pointvalue(),
+      self.__v3_to_v4_point_entity(v3_property_value.pointvalue,
                                    v4_value.mutable_entity_value())
       if v3_meaning != entity_pb.Property.GEORSS_POINT:
         v4_value.set_meaning(MEANING_PREDEFINED_ENTITY_POINT)
         v3_meaning = None
     elif v3_property_value.has_uservalue():
-      self.__v3_to_v4_user_entity(v3_property_value.uservalue(),
+      self.__v3_to_v4_user_entity(v3_property_value.uservalue,
                                   v4_value.mutable_entity_value())
       v4_value.set_meaning(MEANING_PREDEFINED_ENTITY_USER)
     else:
@@ -515,14 +515,14 @@ class _EntityConverter(object):
       v3_property: an entity_pb.Property to convert to v4 and add to the dict
       indexed: whether the property is indexed
     """
-    property_name = v3_property.name()
+    property_name = v3_property.name
     if property_name in property_map:
       v4_property = property_map[property_name]
     else:
       v4_property = v4_entity.add_property()
       v4_property.set_name(property_name)
       property_map[property_name] = v4_property
-    if v3_property.multiple():
+    if v3_property.multiple:
       self.v3_property_to_v4_value(v3_property, indexed,
                                    v4_property.mutable_value().add_list_value())
     else:
@@ -663,9 +663,9 @@ class _EntityConverter(object):
     """
     v4_entity.Clear()
     v4_entity.property_list().append(
-        self.__v4_double_property(PROPERTY_NAME_X, v3_point_value.x(), False))
+        self.__v4_double_property(PROPERTY_NAME_X, v3_point_value.x, False))
     v4_entity.property_list().append(
-        self.__v4_double_property(PROPERTY_NAME_Y, v3_point_value.y(), False))
+        self.__v4_double_property(PROPERTY_NAME_Y, v3_point_value.y, False))
 
   def __v4_to_v3_user_value(self, v4_user_entity, v3_user_value):
     """Converts a v4 user Entity to a v3 UserValue.
@@ -709,11 +709,11 @@ class _EntityConverter(object):
     """
     v4_entity.Clear()
     v4_entity.property_list().append(
-        self.__v4_string_property(PROPERTY_NAME_EMAIL, v3_user_value.email(),
+        self.__v4_string_property(PROPERTY_NAME_EMAIL, v3_user_value.email,
                                   False))
     v4_entity.property_list().append(self.__v4_string_property(
         PROPERTY_NAME_AUTH_DOMAIN,
-        v3_user_value.auth_domain(), False))
+        v3_user_value.auth_domain, False))
 
     if v3_user_value.gaiaid() != 0:
       v4_entity.property_list().append(self.__v4_integer_property(
@@ -728,12 +728,12 @@ class _EntityConverter(object):
     if v3_user_value.has_federated_identity():
       v4_entity.property_list().append(self.__v4_string_property(
           PROPERTY_NAME_FEDERATED_IDENTITY,
-          v3_user_value.federated_identity(),
+          v3_user_value.federated_identity,
           False))
     if v3_user_value.has_federated_provider():
       v4_entity.property_list().append(self.__v4_string_property(
           PROPERTY_NAME_FEDERATED_PROVIDER,
-          v3_user_value.federated_provider(),
+          v3_user_value.federated_provider,
           False))
 
   def __is_v3_property_value_union_valid(self, v3_property_value):
@@ -801,7 +801,7 @@ class _EntityConverter(object):
     Returns:
       boolean: True if the last path element specifies an ID or name.
     """
-    path = v3_ref.path()
+    path = v3_ref.path
     assert path.element_size() >= 1
     last_element = path.element(path.element_size() - 1)
     return last_element.has_id() or last_element.has_name()
@@ -817,7 +817,7 @@ class _EntityConverter(object):
       group: an entity_pb.Path to populate
     """
     group.Clear()
-    path = v3_ref.path()
+    path = v3_ref.path
     assert path.element_size() >= 1
     group.add_element().CopyFrom(path.element(0))
 
@@ -831,17 +831,17 @@ class _EntityConverter(object):
     v3_property_value.Clear()
     reference_value = v3_property_value.mutable_referencevalue()
     if v3_ref.has_app():
-      reference_value.set_app(v3_ref.app())
+      reference_value.set_app(v3_ref.app)
     if v3_ref.has_name_space():
-      reference_value.set_name_space(v3_ref.name_space())
-    for v3_path_element in v3_ref.path().element_list():
+      reference_value.set_name_space(v3_ref.name_space)
+    for v3_path_element in v3_ref.path.element_list(): # type: entity_pb.Path_Element
       v3_ref_value_path_element = reference_value.add_pathelement()
       if v3_path_element.has_type():
-        v3_ref_value_path_element.set_type(v3_path_element.type())
+        v3_ref_value_path_element.set_type(v3_path_element.type)
       if v3_path_element.has_id():
-        v3_ref_value_path_element.set_id(v3_path_element.id())
+        v3_ref_value_path_element.set_id(v3_path_element.id)
       if v3_path_element.has_name():
-        v3_ref_value_path_element.set_name(v3_path_element.name())
+        v3_ref_value_path_element.set_name(v3_path_element.name)
 
   def __v3_reference_value_to_v3_reference(self, v3_ref_value, v3_ref):
     """Converts a v3 ReferenceValue to a v3 Reference.
@@ -852,17 +852,17 @@ class _EntityConverter(object):
     """
     v3_ref.Clear()
     if v3_ref_value.has_app():
-      v3_ref.set_app(v3_ref_value.app())
+      v3_ref.set_app(v3_ref_value.app)
     if v3_ref_value.has_name_space():
-      v3_ref.set_name_space(v3_ref_value.name_space())
-    for v3_ref_value_path_element in v3_ref_value.pathelement_list():
+      v3_ref.set_name_space(v3_ref_value.name_space)
+    for v3_ref_value_path_element in v3_ref_value.pathelement_list():  # type: entity_pb.PropertyValue.ReferenceValue.PathElement
       v3_path_element = v3_ref.mutable_path().add_element()
       if v3_ref_value_path_element.has_type():
-        v3_path_element.set_type(v3_ref_value_path_element.type())
+        v3_path_element.set_type(v3_ref_value_path_element.type)
       if v3_ref_value_path_element.has_id():
-        v3_path_element.set_id(v3_ref_value_path_element.id())
+        v3_path_element.set_id(v3_ref_value_path_element.id)
       if v3_ref_value_path_element.has_name():
-        v3_path_element.set_name(v3_ref_value_path_element.name())
+        v3_path_element.set_name(v3_ref_value_path_element.name)
 
 
 

@@ -36,6 +36,7 @@ case "$1" in
         installgems
         postinstallhaproxy
         postinstallnginx
+        installappserverpython
         installjavajdk
         installappserverjava
         installtornado

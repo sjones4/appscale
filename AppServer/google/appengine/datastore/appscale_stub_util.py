@@ -68,7 +68,7 @@ def _GetScatterProperty(entity_proto):
     have a scatter property.
   """
   hash_obj = _MD5_FUNC()
-  for element in entity_proto.key().path().element_list():
+  for element in entity_proto.key.path.element_list():
     if element.has_name():
       hash_obj.update(element.name())
     elif element.has_id():
@@ -179,13 +179,13 @@ def ValidateQuery(query, filters, orders, max_query_components):
                ' + sort orders ancestor total' % max_query_components)
 
   if query.has_ancestor():
-    ancestor = query.ancestor()
-    if query.app() != ancestor.app():
+    ancestor = query.ancestor
+    if query.app != ancestor.app:
       BadRequest('query app is %s but ancestor app is %s' %
-                 (query.app(), ancestor.app()))
-    if query.name_space() != ancestor.name_space():
+                 (query.app, ancestor.app))
+    if query.name_space != ancestor.name_space:
       BadRequest('query namespace is %s but ancestor namespace is %s' %
-                 (query.name_space(), ancestor.name_space()))
+                 (query.name_space, ancestor.name_space))
 
 
 
@@ -205,14 +205,14 @@ def ValidateQuery(query, filters, orders, max_query_components):
       if not prop.value().has_referencevalue():
         BadRequest('%s filter value must be a Key' % key_prop_name)
       ref_val = prop.value().referencevalue()
-      if ref_val.app() != query.app():
+      if ref_val.app() != query.app:
         BadRequest('%s filter app is %s but query app is %s' %
-                   (key_prop_name, ref_val.app(), query.app()))
-      if ref_val.name_space() != query.name_space():
+                   (key_prop_name, ref_val.app(), query.app))
+      if ref_val.name_space() != query.name_space:
         BadRequest('%s filter namespace is %s but query namespace is %s' %
-                   (key_prop_name, ref_val.name_space(), query.name_space()))
+                   (key_prop_name, ref_val.name_space(), query.name_space))
 
-    if (filter.op() in datastore_index.INEQUALITY_OPERATORS and
+    if (filter.op in datastore_index.INEQUALITY_OPERATORS and
         prop_name != unapplied_log_timestamp_us_name):
       if ineq_prop_name is None:
         ineq_prop_name = prop_name
@@ -222,7 +222,7 @@ def ValidateQuery(query, filters, orders, max_query_components):
 
   if ineq_prop_name is not None and orders:
 
-    first_order_prop = orders[0].property().decode('utf-8')
+    first_order_prop = orders[0].property.decode('utf-8')
     if first_order_prop != ineq_prop_name:
       BadRequest('The first sort property must be the same as the property '
                  'to which the inequality filter is applied.  In your query '
@@ -237,9 +237,9 @@ def ValidateQuery(query, filters, orders, max_query_components):
           prop_name != unapplied_log_timestamp_us_name):
         BadRequest('kind is required for non-__key__ filters')
     for order in orders:
-      prop_name = order.property().decode('utf-8')
+      prop_name = order.property.decode('utf-8')
       if not (prop_name == key_prop_name and
-              order.direction() is datastore_pb.Query_Order.ASCENDING):
+              order.direction is datastore_pb.Query_Order.ASCENDING):
         BadRequest('kind is required for all orders except __key__ ascending')
 
 
@@ -346,7 +346,7 @@ def ParseKeyFilteredQuery(filters, orders):
   key_range = ValueRange()
   key_prop = datastore_types._KEY_SPECIAL_PROPERTY
   for f in filters:
-    op = f.op()
+    op = f.op
     if not (f.property_size() == 1 and
             f.property(0).name() == key_prop and
             not (op == datastore_pb.Query_Filter.IN or
@@ -363,8 +363,8 @@ def ParseKeyFilteredQuery(filters, orders):
 
   remaining_orders = []
   for o in orders:
-    if not (o.direction() == datastore_pb.Query_Order.ASCENDING and
-            o.property() == datastore_types._KEY_SPECIAL_PROPERTY):
+    if not (o.direction == datastore_pb.Query_Order.ASCENDING and
+            o.property == datastore_types._KEY_SPECIAL_PROPERTY):
       remaining_orders.append(o)
     else:
       break
@@ -479,7 +479,7 @@ def ParsePropertyQuery(query, filters, orders):
   key_range.Remap(lambda x: _PropertyKeyToString(x, ''))
 
   if query.has_ancestor():
-    ancestor = datastore_types.Key._FromPb(query.ancestor())
+    ancestor = datastore_types.Key._FromPb(query.ancestor)
     ancestor_kind, ancestor_property = _PropertyKeyToString(ancestor, None)
 
 
@@ -555,8 +555,8 @@ def FillUser(property):
   Args:
     property: A Property which may have a user value.
   """
-  if property.value().has_uservalue():
-    uid = SynthesizeUserId(property.value().uservalue().email())
+  if property.value.has_uservalue():
+    uid = SynthesizeUserId(property.value.uservalue.email)
     if uid:
       property.mutable_value().mutable_uservalue().set_obfuscated_gaiaid(uid)
 
@@ -599,7 +599,7 @@ class BaseCursor(object):
 
   def PopulateCursor(self, query_result):
     """ Creates cursor for the given query result. """
-    if query_result.more_results():
+    if query_result.more_results:
       cursor = query_result.mutable_cursor()
       cursor.set_app(self.app)
       cursor.set_cursor(self.cursor)
@@ -614,6 +614,485 @@ class BaseCursor(object):
     finally:
       cls._next_cursor_lock.release()
     return cursor_id
+
+
+class QueryResult(object):
+    has_cursor_ = 0
+    cursor_ = None
+    has_skipped_results_ = 0
+    skipped_results_ = 0
+    has_more_results_ = 0
+    more_results_ = 0
+    has_keys_only_ = 0
+    keys_only_ = 0
+    has_index_only_ = 0
+    index_only_ = 0
+    has_small_ops_ = 0
+    small_ops_ = 0
+    has_compiled_query_ = 0
+    compiled_query_ = None
+    has_compiled_cursor_ = 0
+    compiled_cursor_ = None
+
+    def __init__(self, contents=None):
+        self.result_ = []
+        self.index_ = []
+        if contents is not None: self.MergeFromString(contents)
+
+    def cursor(self):
+        if self.cursor_ is None: self.cursor_ = Cursor()
+        return self.cursor_
+
+    def mutable_cursor(self): self.has_cursor_ = 1; return self.cursor()
+
+    def clear_cursor(self):
+        if self.has_cursor_:
+            self.has_cursor_ = 0;
+            if self.cursor_ is not None: self.cursor_.Clear()
+
+    def has_cursor(self): return self.has_cursor_
+
+    def result_size(self): return len(self.result_)
+    def result_list(self): return self.result_
+
+    def result(self, i):
+        return self.result_[i]
+
+    # def mutable_result(self, i):
+    #     return self.result_[i]
+    #
+    # def add_result(self):
+    #     x = EntityProto()
+    #     self.result_.append(x)
+    #     return x
+    #
+    # def clear_result(self):
+    #     self.result_ = []
+    # def skipped_results(self): return self.skipped_results_
+    #
+    # def set_skipped_results(self, x):
+    #     self.has_skipped_results_ = 1
+    #     self.skipped_results_ = x
+    #
+    # def clear_skipped_results(self):
+    #     if self.has_skipped_results_:
+    #         self.has_skipped_results_ = 0
+    #         self.skipped_results_ = 0
+    #
+    # def has_skipped_results(self): return self.has_skipped_results_
+    #
+    # def more_results(self): return self.more_results_
+    #
+    # def set_more_results(self, x):
+    #     self.has_more_results_ = 1
+    #     self.more_results_ = x
+    #
+    # def clear_more_results(self):
+    #     if self.has_more_results_:
+    #         self.has_more_results_ = 0
+    #         self.more_results_ = 0
+    #
+    # def has_more_results(self): return self.has_more_results_
+
+    def keys_only(self): return self.keys_only_
+
+    def set_keys_only(self, x):
+        self.has_keys_only_ = 1
+        self.keys_only_ = x
+
+    def clear_keys_only(self):
+        if self.has_keys_only_:
+            self.has_keys_only_ = 0
+            self.keys_only_ = 0
+
+    def has_keys_only(self): return self.has_keys_only_
+
+    def index_only(self): return self.index_only_
+
+    def set_index_only(self, x):
+        self.has_index_only_ = 1
+        self.index_only_ = x
+
+    def clear_index_only(self):
+        if self.has_index_only_:
+            self.has_index_only_ = 0
+            self.index_only_ = 0
+
+    def has_index_only(self): return self.has_index_only_
+
+    def small_ops(self): return self.small_ops_
+
+    def set_small_ops(self, x):
+        self.has_small_ops_ = 1
+        self.small_ops_ = x
+
+    def clear_small_ops(self):
+        if self.has_small_ops_:
+            self.has_small_ops_ = 0
+            self.small_ops_ = 0
+
+    def has_small_ops(self): return self.has_small_ops_
+
+    # def compiled_query(self):
+    #     if self.compiled_query_ is None:
+    #         self.lazy_init_lock_.acquire()
+    #         try:
+    #             if self.compiled_query_ is None: self.compiled_query_ = CompiledQuery()
+    #         finally:
+    #             self.lazy_init_lock_.release()
+    #     return self.compiled_query_
+    #
+    # def mutable_compiled_query(self): self.has_compiled_query_ = 1; return self.compiled_query()
+    #
+    # def clear_compiled_query(self):
+    #
+    #     if self.has_compiled_query_:
+    #         self.has_compiled_query_ = 0;
+    #         if self.compiled_query_ is not None: self.compiled_query_.Clear()
+    #
+    # def has_compiled_query(self): return self.has_compiled_query_
+    #
+    # def compiled_cursor(self):
+    #     if self.compiled_cursor_ is None:
+    #         self.lazy_init_lock_.acquire()
+    #         try:
+    #             if self.compiled_cursor_ is None: self.compiled_cursor_ = CompiledCursor()
+    #         finally:
+    #             self.lazy_init_lock_.release()
+    #     return self.compiled_cursor_
+    #
+    # def mutable_compiled_cursor(self): self.has_compiled_cursor_ = 1; return self.compiled_cursor()
+    #
+    # def clear_compiled_cursor(self):
+    #
+    #     if self.has_compiled_cursor_:
+    #         self.has_compiled_cursor_ = 0;
+    #         if self.compiled_cursor_ is not None: self.compiled_cursor_.Clear()
+    #
+    # def has_compiled_cursor(self): return self.has_compiled_cursor_
+
+    def index_size(self): return len(self.index_)
+    def index_list(self): return self.index_
+
+    def index(self, i):
+        return self.index_[i]
+
+    # def mutable_index(self, i):
+    #     return self.index_[i]
+    #
+    # def add_index(self):
+    #     x = CompositeIndex()
+    #     self.index_.append(x)
+    #     return x
+    #
+    # def clear_index(self):
+    #     self.index_ = []
+
+    def MergeFrom(self, x):
+        assert x is not self
+        if (x.has_cursor()): self.mutable_cursor().MergeFrom(x.cursor())
+        for i in xrange(x.result_size()): self.add_result().CopyFrom(x.result(i))
+        if (x.has_skipped_results()): self.set_skipped_results(x.skipped_results())
+        if (x.has_more_results()): self.set_more_results(x.more_results())
+        if (x.has_keys_only()): self.set_keys_only(x.keys_only())
+        if (x.has_index_only()): self.set_index_only(x.index_only())
+        if (x.has_small_ops()): self.set_small_ops(x.small_ops())
+        if (x.has_compiled_query()): self.mutable_compiled_query().MergeFrom(x.compiled_query())
+        if (x.has_compiled_cursor()): self.mutable_compiled_cursor().MergeFrom(x.compiled_cursor())
+        for i in xrange(x.index_size()): self.add_index().CopyFrom(x.index(i))
+
+    def Equals(self, x):
+        if x is self: return 1
+        if self.has_cursor_ != x.has_cursor_: return 0
+        if self.has_cursor_ and self.cursor_ != x.cursor_: return 0
+        if len(self.result_) != len(x.result_): return 0
+        for e1, e2 in zip(self.result_, x.result_):
+            if e1 != e2: return 0
+        if self.has_skipped_results_ != x.has_skipped_results_: return 0
+        if self.has_skipped_results_ and self.skipped_results_ != x.skipped_results_: return 0
+        if self.has_more_results_ != x.has_more_results_: return 0
+        if self.has_more_results_ and self.more_results_ != x.more_results_: return 0
+        if self.has_keys_only_ != x.has_keys_only_: return 0
+        if self.has_keys_only_ and self.keys_only_ != x.keys_only_: return 0
+        if self.has_index_only_ != x.has_index_only_: return 0
+        if self.has_index_only_ and self.index_only_ != x.index_only_: return 0
+        if self.has_small_ops_ != x.has_small_ops_: return 0
+        if self.has_small_ops_ and self.small_ops_ != x.small_ops_: return 0
+        if self.has_compiled_query_ != x.has_compiled_query_: return 0
+        if self.has_compiled_query_ and self.compiled_query_ != x.compiled_query_: return 0
+        if self.has_compiled_cursor_ != x.has_compiled_cursor_: return 0
+        if self.has_compiled_cursor_ and self.compiled_cursor_ != x.compiled_cursor_: return 0
+        if len(self.index_) != len(x.index_): return 0
+        for e1, e2 in zip(self.index_, x.index_):
+            if e1 != e2: return 0
+        return 1
+
+    def IsInitialized(self, debug_strs=None):
+        initialized = 1
+        if (self.has_cursor_ and not self.cursor_.IsInitialized(debug_strs)): initialized = 0
+        for p in self.result_:
+            if not p.IsInitialized(debug_strs): initialized=0
+        if (not self.has_more_results_):
+            initialized = 0
+            if debug_strs is not None:
+                debug_strs.append('Required field: more_results not set.')
+        if (self.has_compiled_query_ and not self.compiled_query_.IsInitialized(debug_strs)): initialized = 0
+        if (self.has_compiled_cursor_ and not self.compiled_cursor_.IsInitialized(debug_strs)): initialized = 0
+        for p in self.index_:
+            if not p.IsInitialized(debug_strs): initialized=0
+        return initialized
+
+    def ByteSize(self):
+        n = 0
+        if (self.has_cursor_): n += 1 + self.lengthString(self.cursor_.ByteSize())
+        n += 1 * len(self.result_)
+        for i in xrange(len(self.result_)): n += self.lengthString(self.result_[i].ByteSize())
+        if (self.has_skipped_results_): n += 1 + self.lengthVarInt64(self.skipped_results_)
+        if (self.has_keys_only_): n += 2
+        if (self.has_index_only_): n += 2
+        if (self.has_small_ops_): n += 2
+        if (self.has_compiled_query_): n += 1 + self.lengthString(self.compiled_query_.ByteSize())
+        if (self.has_compiled_cursor_): n += 1 + self.lengthString(self.compiled_cursor_.ByteSize())
+        n += 1 * len(self.index_)
+        for i in xrange(len(self.index_)): n += self.lengthString(self.index_[i].ByteSize())
+        return n + 2
+
+    def ByteSizePartial(self):
+        n = 0
+        if (self.has_cursor_): n += 1 + self.lengthString(self.cursor_.ByteSizePartial())
+        n += 1 * len(self.result_)
+        for i in xrange(len(self.result_)): n += self.lengthString(self.result_[i].ByteSizePartial())
+        if (self.has_skipped_results_): n += 1 + self.lengthVarInt64(self.skipped_results_)
+        if (self.has_more_results_):
+            n += 2
+        if (self.has_keys_only_): n += 2
+        if (self.has_index_only_): n += 2
+        if (self.has_small_ops_): n += 2
+        if (self.has_compiled_query_): n += 1 + self.lengthString(self.compiled_query_.ByteSizePartial())
+        if (self.has_compiled_cursor_): n += 1 + self.lengthString(self.compiled_cursor_.ByteSizePartial())
+        n += 1 * len(self.index_)
+        for i in xrange(len(self.index_)): n += self.lengthString(self.index_[i].ByteSizePartial())
+        return n
+
+    def Clear(self):
+        self.clear_cursor()
+        self.clear_result()
+        self.clear_skipped_results()
+        self.clear_more_results()
+        self.clear_keys_only()
+        self.clear_index_only()
+        self.clear_small_ops()
+        self.clear_compiled_query()
+        self.clear_compiled_cursor()
+        self.clear_index()
+
+    def OutputUnchecked(self, out):
+        if (self.has_cursor_):
+            out.putVarInt32(10)
+            out.putVarInt32(self.cursor_.ByteSize())
+            self.cursor_.OutputUnchecked(out)
+        for i in xrange(len(self.result_)):
+            out.putVarInt32(18)
+            out.putVarInt32(self.result_[i].ByteSize())
+            self.result_[i].OutputUnchecked(out)
+        out.putVarInt32(24)
+        out.putBoolean(self.more_results_)
+        if (self.has_keys_only_):
+            out.putVarInt32(32)
+            out.putBoolean(self.keys_only_)
+        if (self.has_compiled_query_):
+            out.putVarInt32(42)
+            out.putVarInt32(self.compiled_query_.ByteSize())
+            self.compiled_query_.OutputUnchecked(out)
+        if (self.has_compiled_cursor_):
+            out.putVarInt32(50)
+            out.putVarInt32(self.compiled_cursor_.ByteSize())
+            self.compiled_cursor_.OutputUnchecked(out)
+        if (self.has_skipped_results_):
+            out.putVarInt32(56)
+            out.putVarInt32(self.skipped_results_)
+        for i in xrange(len(self.index_)):
+            out.putVarInt32(66)
+            out.putVarInt32(self.index_[i].ByteSize())
+            self.index_[i].OutputUnchecked(out)
+        if (self.has_index_only_):
+            out.putVarInt32(72)
+            out.putBoolean(self.index_only_)
+        if (self.has_small_ops_):
+            out.putVarInt32(80)
+            out.putBoolean(self.small_ops_)
+
+    def OutputPartial(self, out):
+        if (self.has_cursor_):
+            out.putVarInt32(10)
+            out.putVarInt32(self.cursor_.ByteSizePartial())
+            self.cursor_.OutputPartial(out)
+        for i in xrange(len(self.result_)):
+            out.putVarInt32(18)
+            out.putVarInt32(self.result_[i].ByteSizePartial())
+            self.result_[i].OutputPartial(out)
+        if (self.has_more_results_):
+            out.putVarInt32(24)
+            out.putBoolean(self.more_results_)
+        if (self.has_keys_only_):
+            out.putVarInt32(32)
+            out.putBoolean(self.keys_only_)
+        if (self.has_compiled_query_):
+            out.putVarInt32(42)
+            out.putVarInt32(self.compiled_query_.ByteSizePartial())
+            self.compiled_query_.OutputPartial(out)
+        if (self.has_compiled_cursor_):
+            out.putVarInt32(50)
+            out.putVarInt32(self.compiled_cursor_.ByteSizePartial())
+            self.compiled_cursor_.OutputPartial(out)
+        if (self.has_skipped_results_):
+            out.putVarInt32(56)
+            out.putVarInt32(self.skipped_results_)
+        for i in xrange(len(self.index_)):
+            out.putVarInt32(66)
+            out.putVarInt32(self.index_[i].ByteSizePartial())
+            self.index_[i].OutputPartial(out)
+        if (self.has_index_only_):
+            out.putVarInt32(72)
+            out.putBoolean(self.index_only_)
+        if (self.has_small_ops_):
+            out.putVarInt32(80)
+            out.putBoolean(self.small_ops_)
+
+    def TryMerge(self, d):
+        while d.avail() > 0:
+            tt = d.getVarInt32()
+            if tt == 10:
+                length = d.getVarInt32()
+                tmp = ProtocolBuffer.Decoder(d.buffer(), d.pos(), d.pos() + length)
+                d.skip(length)
+                self.mutable_cursor().TryMerge(tmp)
+                continue
+            if tt == 18:
+                length = d.getVarInt32()
+                tmp = ProtocolBuffer.Decoder(d.buffer(), d.pos(), d.pos() + length)
+                d.skip(length)
+                self.add_result().TryMerge(tmp)
+                continue
+            if tt == 24:
+                self.set_more_results(d.getBoolean())
+                continue
+            if tt == 32:
+                self.set_keys_only(d.getBoolean())
+                continue
+            if tt == 42:
+                length = d.getVarInt32()
+                tmp = ProtocolBuffer.Decoder(d.buffer(), d.pos(), d.pos() + length)
+                d.skip(length)
+                self.mutable_compiled_query().TryMerge(tmp)
+                continue
+            if tt == 50:
+                length = d.getVarInt32()
+                tmp = ProtocolBuffer.Decoder(d.buffer(), d.pos(), d.pos() + length)
+                d.skip(length)
+                self.mutable_compiled_cursor().TryMerge(tmp)
+                continue
+            if tt == 56:
+                self.set_skipped_results(d.getVarInt32())
+                continue
+            if tt == 66:
+                length = d.getVarInt32()
+                tmp = ProtocolBuffer.Decoder(d.buffer(), d.pos(), d.pos() + length)
+                d.skip(length)
+                self.add_index().TryMerge(tmp)
+                continue
+            if tt == 72:
+                self.set_index_only(d.getBoolean())
+                continue
+            if tt == 80:
+                self.set_small_ops(d.getBoolean())
+                continue
+
+
+            if (tt == 0): raise ProtocolBuffer.ProtocolBufferDecodeError
+            d.skipData(tt)
+
+
+    def __str__(self, prefix="", printElemNumber=0):
+        res=""
+        if self.has_cursor_:
+            res+=prefix+"cursor <\n"
+            res+=self.cursor_.__str__(prefix + "  ", printElemNumber)
+            res+=prefix+">\n"
+        cnt=0
+        for e in self.result_:
+            elm=""
+            if printElemNumber: elm="(%d)" % cnt
+            res+=prefix+("result%s <\n" % elm)
+            res+=e.__str__(prefix + "  ", printElemNumber)
+            res+=prefix+">\n"
+            cnt+=1
+        if self.has_skipped_results_: res+=prefix+("skipped_results: %s\n" % self.DebugFormatInt32(self.skipped_results_))
+        if self.has_more_results_: res+=prefix+("more_results: %s\n" % self.DebugFormatBool(self.more_results_))
+        if self.has_keys_only_: res+=prefix+("keys_only: %s\n" % self.DebugFormatBool(self.keys_only_))
+        if self.has_index_only_: res+=prefix+("index_only: %s\n" % self.DebugFormatBool(self.index_only_))
+        if self.has_small_ops_: res+=prefix+("small_ops: %s\n" % self.DebugFormatBool(self.small_ops_))
+        if self.has_compiled_query_:
+            res+=prefix+"compiled_query <\n"
+            res+=self.compiled_query_.__str__(prefix + "  ", printElemNumber)
+            res+=prefix+">\n"
+        if self.has_compiled_cursor_:
+            res+=prefix+"compiled_cursor <\n"
+            res+=self.compiled_cursor_.__str__(prefix + "  ", printElemNumber)
+            res+=prefix+">\n"
+        cnt=0
+        for e in self.index_:
+            elm=""
+            if printElemNumber: elm="(%d)" % cnt
+            res+=prefix+("index%s <\n" % elm)
+            res+=e.__str__(prefix + "  ", printElemNumber)
+            res+=prefix+">\n"
+            cnt+=1
+        return res
+
+
+    # def _BuildTagLookupTable(sparse, maxtag, default=None):
+    #     return tuple([sparse.get(i, default) for i in xrange(0, 1+maxtag)])
+    #
+    # kcursor = 1
+    # kresult = 2
+    # kskipped_results = 7
+    # kmore_results = 3
+    # kkeys_only = 4
+    # kindex_only = 9
+    # ksmall_ops = 10
+    # kcompiled_query = 5
+    # kcompiled_cursor = 6
+    # kindex = 8
+    #
+    # _TEXT = _BuildTagLookupTable({
+    #     0: "ErrorCode",
+    #     1: "cursor",
+    #     2: "result",
+    #     3: "more_results",
+    #     4: "keys_only",
+    #     5: "compiled_query",
+    #     6: "compiled_cursor",
+    #     7: "skipped_results",
+    #     8: "index",
+    #     9: "index_only",
+    #     10: "small_ops",
+    # }, 10)
+    #
+    # _TYPES = _BuildTagLookupTable({
+    #     0: ProtocolBuffer.Encoder.NUMERIC,
+    #     1: ProtocolBuffer.Encoder.STRING,
+    #     2: ProtocolBuffer.Encoder.STRING,
+    #     3: ProtocolBuffer.Encoder.NUMERIC,
+    #     4: ProtocolBuffer.Encoder.NUMERIC,
+    #     5: ProtocolBuffer.Encoder.STRING,
+    #     6: ProtocolBuffer.Encoder.STRING,
+    #     7: ProtocolBuffer.Encoder.NUMERIC,
+    #     8: ProtocolBuffer.Encoder.STRING,
+    #     9: ProtocolBuffer.Encoder.NUMERIC,
+    #     10: ProtocolBuffer.Encoder.NUMERIC,
+    # }, 10, ProtocolBuffer.Encoder.MAX_TYPE)
+
 
 
 class QueryCursor(object):
@@ -649,12 +1128,11 @@ class QueryCursor(object):
     if self.__results:
       last_result = self.__results[-1]
     elif self.__last_ent:
-      last_result = entity_pb.EntityProto()
-      last_result.ParseFromString(self.__last_ent)
+      last_result = entity_pb.EntityProto.FromString(self.__last_ent)
 
     if last_result is not None:
       position = compiled_cursor.add_position()
-      position.mutable_key().MergeFrom(last_result.key())
+      position.mutable_key().MergeFrom(last_result.key)
       for prop in last_result.property_list():
         if prop.name() in self.__order_property_names:
           indexvalue = position.add_indexvalue()
@@ -701,29 +1179,29 @@ class ListCursor(BaseCursor):
     Args:
       query: the query request proto
     """
-    super(ListCursor, self).__init__(query.app())
+    super(ListCursor, self).__init__(query.app)
 
     self.__order_property_names = order_property_names(query)
-    if query.has_compiled_cursor() and query.compiled_cursor().position_list():
+    if query.has_compiled_cursor() and query.compiled_cursor.position_list():
       self.__last_result, _ = (self._DecodeCompiledCursor(
-          query.compiled_cursor()))
+          query.compiled_cursor))
     else:
       self.__last_result = None
 
     if query.has_end_compiled_cursor():
-      if query.end_compiled_cursor().position_list():
+      if query.end_compiled_cursor.position_list():
         self.__end_result, _ = self._DecodeCompiledCursor(
-            query.end_compiled_cursor())
+            query.end_compiled_cursor)
     else:
       self.__end_result = None
 
     self.__query = query
     self.__offset = 0
-    self.__count = query.limit()
+    self.__count = query.limit
 
 
-    self.keys_only = query.keys_only()
-    
+    self.keys_only = query.keys_only
+
   def _GetLastResult(self):
     """ Protected access to private member. """
     return self.__last_result
@@ -778,14 +1256,14 @@ class ListCursor(BaseCursor):
     """
     assert len(compiled_cursor.position_list()) == 1
 
-    position = compiled_cursor.position(0)
+    position = compiled_cursor.position
 
 
 
 
     remaining_properties = self.__order_property_names.copy()
     cursor_entity = datastore_pb.EntityProto()
-    cursor_entity.mutable_key().CopyFrom(position.key())
+    cursor_entity.mutable_key().CopyFrom(position.key)
     for indexvalue in position.indexvalue_list():
       property = cursor_entity.add_property()
       property.set_name(indexvalue.property())
@@ -796,7 +1274,7 @@ class ListCursor(BaseCursor):
           'Cursor does not match query: missing values for %r' %
           remaining_properties)
 
-    return (cursor_entity, position.start_inclusive())
+    return (cursor_entity, position.start_inclusive)
 
   def Count(self):
     """Counts results, up to the query's limit.
@@ -819,5 +1297,5 @@ def CompareEntityPbByKey(a, b):
   Returns:
      <0 if a's key is before b's, =0 if they are the same key, and >0 otherwise.
   """
-  return cmp(datastore_types.Key._FromPb(a.key()),
-             datastore_types.Key._FromPb(b.key()))
+  return cmp(datastore_types.Key._FromPb(a.key),
+             datastore_types.Key._FromPb(b.key))

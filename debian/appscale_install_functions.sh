@@ -184,13 +184,20 @@ export EC2_PRIVATE_KEY=${CONFIG_DIR}/certs/mykey.pem
 export EC2_CERT=${CONFIG_DIR}/certs/mycert.pem
 export LC_ALL='en_US.UTF-8'
 EOF
-# This enables to load AppServer and AppDB modules. It must be before the python-support.
+    # This enables to load AppServer and AppDB modules. It must be before the python-support.
     DESTFILE=${DESTDIR}/usr/lib/python2.7/dist-packages/appscale_appserver.pth
     mkdir -pv $(dirname $DESTFILE)
     echo "Generating $DESTFILE"
     cat <<EOF | tee $DESTFILE
 ${APPSCALE_HOME_RUNTIME}/AppDB
 ${APPSCALE_HOME_RUNTIME}/AppServer
+EOF
+    # Ensure google namespace is set up even if appengine packages are imported first
+    DESTFILE=${DESTDIR}/usr/lib/python2.7/dist-packages/appscale_google_appengine.pth
+    mkdir -pv $(dirname $DESTFILE)
+    echo "Generating $DESTFILE"
+    cat <<EOF | tee $DESTFILE
+import google.protobuf; import google; import pkgutil; pkgutil.extend_path(google.__path__, google.__name__)
 EOF
 # Enable to load site-packages of Python.
     DESTFILE=${DESTDIR}/usr/local/lib/python2.7/dist-packages/site_packages.pth
@@ -241,6 +248,12 @@ installjavajdk()
 {
     # This sets the default JVM.
     update-alternatives --set java ${JAVA_HOME_DIRECTORY}/jre/bin/java
+}
+
+installappserverpython()
+{
+    (cd ${APPSCALE_HOME}/AppServer && \
+      protoc --python_out=./google/appengine/datastore/ datastore_v3.proto)
 }
 
 installappserverjava()
@@ -624,14 +637,6 @@ installdatastore()
 
 installapiserver()
 {
-    (cd APIServer && protoc --python_out=./appscale/api_server *.proto)
-    # This package needs to be installed in a virtualenv because the protobuf
-    # library conflicts with the google namespace in the SDK.
-    rm -rf /opt/appscale_api_server
-    virtualenv /opt/appscale_api_server
-
-    # The activate script fails under `set -u`.
-    unset_opt=$(shopt -po nounset)
     case ${DIST} in
         wheezy|trusty)
             # Tornado 5 does not work with Python<2.7.9.
@@ -642,13 +647,11 @@ installapiserver()
             ;;
     esac
 
-    set +u
-    (source /opt/appscale_api_server/bin/activate && \
-     pip install -U pip && \
-     pip install "${tornado_package}" && \
-     pip install ${APPSCALE_HOME}/AppControllerClient ${APPSCALE_HOME}/common \
-     ${APPSCALE_HOME}/APIServer)
-    eval ${unset_opt}
+    pip install "${tornado_package}"
+
+    (cd ${APPSCALE_HOME}/APIServer && protoc --python_out=./appscale/api_server *.proto)
+    pip install --upgrade --no-deps ${APPSCALE_HOME}/APIServer
+    pip install ${APPSCALE_HOME}/APIServer
 }
 
 prepdashboard()

@@ -89,8 +89,6 @@ _STUB_DEPENDENCIES = [
 
 
 EXTRA_PATHS = _STUB_DEPENDENCIES + [
-    _DIR_PATH,
-
     os.path.join(_DIR_PATH, 'lib', 'simplejson'),
 
 
@@ -110,8 +108,6 @@ EXTRA_PATHS = _STUB_DEPENDENCIES + [
     ]
 
 _DEVAPPSERVER2_PATHS = _STUB_DEPENDENCIES + [
-    _DIR_PATH,
-
     os.path.join(_DIR_PATH, 'lib', 'concurrent'),
     os.path.join(_DIR_PATH, 'lib', 'cherrypy'),
     os.path.join(_DIR_PATH, 'lib', 'jinja2-2.6'),
@@ -126,8 +122,6 @@ _PHP_RUNTIME_PATHS = [
     ]
 
 _PYTHON_RUNTIME_PATHS = [
-    _DIR_PATH,
-
     os.path.join(_DIR_PATH, 'lib', 'concurrent'),
     os.path.join(_DIR_PATH, 'lib', 'cherrypy'),
     os.path.join(_DIR_PATH, 'lib', 'fancy_urllib'),

@@ -60,7 +60,7 @@ from appscale.hermes.constants import HERMES_PORT
 
 
 # The location of the API server start script.
-API_SERVER_LOCATION = os.path.join('/', 'opt', 'appscale_api_server', 'bin',
+API_SERVER_LOCATION = os.path.join('/', 'usr', 'local', 'bin',
                                    'appscale-api-server')
 
 # The Monit watch prefix for API servers.
