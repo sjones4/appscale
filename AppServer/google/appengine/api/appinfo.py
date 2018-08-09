@@ -1220,7 +1220,7 @@ class Library(validation.Validated):
 
 class AutomaticScaling(validation.Validated):
   """Class representing automatic scaling settings in the AppInfoExternal."""
-  ATTRIBUTES = {
+  ATTRIBUTES = {  # TODO:STEVE: min_instances / max_instances / target_cpu_utilization / target_throughput_utilization
       MINIMUM_IDLE_INSTANCES: validation.Optional(_IDLE_INSTANCES_REGEX),
       MAXIMUM_IDLE_INSTANCES: validation.Optional(_IDLE_INSTANCES_REGEX),
       MINIMUM_PENDING_LATENCY: validation.Optional(_PENDING_LATENCY_REGEX),

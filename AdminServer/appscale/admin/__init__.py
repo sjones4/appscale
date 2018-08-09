@@ -435,6 +435,43 @@ class ProjectHandler(BaseVersionHandler):
     IOLoop.current().spawn_callback(self.wait_for_delete,
                                     ports_to_close, project_id)
 
+class ServicesHandler(BaseVersionHandler):
+  def initialize(self, acc, ua_client, zk_client, version_update_lock,
+                 thread_pool):
+    """ Defines required resources to handle requests.
+
+    Args:
+      acc: An AppControllerClient.
+      ua_client: A UAClient.
+      zk_client: A KazooClient.
+      version_update_lock: A kazoo lock.
+      thread_pool: A ThreadPoolExecutor.
+    """
+    self.acc = acc
+    self.ua_client = ua_client
+    self.zk_client = zk_client
+    self.version_update_lock = version_update_lock
+    self.thread_pool = thread_pool
+
+  def get(self, project_id):
+    """ List services.
+
+    Args:
+      project_id: A string specifying a project ID.
+    """
+    self.authenticate(project_id, self.ua_client)
+
+    services_list = []
+    project_path = constants.PROJECT_NODE_TEMPLATE.format(project_id)
+    for service_id in self.zk_client.get_children("{0}/services"
+                                                  .format(project_path)):
+      services_list.append({
+          'name': 'apps/{0}/services/{1}'.format(project_id, service_id),
+          'id': service_id
+      })
+
+    self.write(json.dumps({'services': services_list}))
+
 
 class ServiceHandler(BaseVersionHandler):
   def initialize(self, acc, ua_client, zk_client, version_update_lock,
@@ -453,6 +490,35 @@ class ServiceHandler(BaseVersionHandler):
     self.zk_client = zk_client
     self.version_update_lock = version_update_lock
     self.thread_pool = thread_pool
+
+  def service_exists(self, project_id, service_id):
+    """ Checks if a service exists.
+
+    Args:
+      project_id: A string specifying a project ID.
+      service_id: A string specifying a service ID.
+    """
+    service_node = constants.SERVICE_NODE_TEMPLATE.format(
+        project_id=project_id, service_id=service_id)
+    return self.zk_client.exists(service_node) is not None
+
+  def get(self, project_id, service_id):
+    """ Get details for a service.
+
+    Args:
+      project_id: A string specifying a project ID.
+      service_id: A string specifying a service ID.
+    """
+    self.authenticate(project_id, self.ua_client)
+
+    if not self.service_exists(project_id, service_id):
+        raise CustomHTTPError(HTTPCodes.NOT_FOUND, message='Service not found')
+
+    response = {
+        'name': 'apps/{0}/services/{1}'.format(project_id, service_id),
+        'id': service_id
+    }
+    self.write(json_encode(response))
 
   @gen.coroutine
   def delete(self, project_id, service_id):
@@ -570,9 +636,9 @@ class VersionsHandler(BaseHandler):
     version['id'] = str(version['id'])
 
     # Prevent multiple versions per service.
-    if version['id'] != constants.DEFAULT_VERSION:
-      raise CustomHTTPError(HTTPCodes.BAD_REQUEST,
-                            message='Invalid version ID')
+    #if version['id'] != constants.DEFAULT_VERSION:
+    #  raise CustomHTTPError(HTTPCodes.BAD_REQUEST,
+    #                        message='Invalid version ID')
 
     if not self.VERSION_ID_RE.match(version['id']):
       raise CustomHTTPError(HTTPCodes.BAD_REQUEST,
@@ -596,7 +662,7 @@ class VersionsHandler(BaseHandler):
     # version.
     version['revision'] = int(time.time() * 1000)
 
-    extensions = version.get('appscaleExtensions', {})
+    extensions = version.get('appscaleExtensions', {})  # TODO:STEVE: not compatible with multiple versions
     http_port = extensions.get('httpPort', None)
     https_port = extensions.get('httpsPort', None)
     if http_port is not None and http_port not in constants.ALLOWED_HTTP_PORTS:
@@ -820,6 +886,30 @@ class VersionsHandler(BaseHandler):
                                 self.acc)
 
     self.write(json_encode(operation.rest_repr()))
+
+  def get(self, project_id, service_id):
+    """ List versions.
+
+    Args:
+      project_id: A string specifying a project ID.
+      service_id: A string specifying a service ID.
+    """
+    self.authenticate(project_id, self.ua_client)
+
+    versions_list = []
+    service_path = constants.SERVICE_NODE_TEMPLATE.format(
+        project_id=project_id, service_id=service_id)
+    for version_id in self.zk_client.get_children("{0}/versions"
+                                                  .format(service_path)):
+        versions_list.append({
+          'name': 'apps/{0}/services/{1}/versions/{2}'.format(project_id,
+                                                               service_id,
+                                                               version_id),
+          'id': version_id
+      })
+
+
+    self.write(json.dumps({'versions': versions_list}))
 
 
 class VersionHandler(BaseVersionHandler):
@@ -1246,6 +1336,8 @@ def main():
      all_resources),
     ('/v1/projects', ProjectsHandler, all_resources),
     ('/v1/projects/([a-z0-9-]+)', ProjectHandler, all_resources),
+    ('/v1/apps/([a-z0-9-]+)/services', ServicesHandler,
+     all_resources),
     ('/v1/apps/([a-z0-9-]+)/services/([a-z0-9-]+)', ServiceHandler,
      all_resources),
     ('/v1/apps/([a-z0-9-]+)/services/([a-z0-9-]+)/versions/([a-z0-9-]+)',

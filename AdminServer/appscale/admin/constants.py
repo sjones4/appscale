@@ -111,6 +111,10 @@ SUPPORTED_INBOUND_SERVICES = ('INBOUND_SERVICE_WARMUP',
 # The ZooKeeper location for storing project details.
 PROJECT_NODE_TEMPLATE = '/appscale/projects/{}'
 
+# The ZooKeeper location for storing service details.
+SERVICE_NODE_TEMPLATE = ('/appscale/projects/{project_id}'
+                         '/services/{service_id}')
+
 # The ZooKeeper location for storing version details.
 VERSION_NODE_TEMPLATE = ('/appscale/projects/{project_id}'
                          '/services/{service_id}/versions/{version_id}')

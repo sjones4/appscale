@@ -5347,6 +5347,10 @@ HOSTS
     # print log about disabled autoscale at intervals with the stats.
     return 0 if @options['autoscale'].downcase != "true"
 
+    # If there are no instances then there is no load to decide scaling
+    # activity, manual update is required to resume autoscaling
+    return 0 if num_appservers == 0
+
     # We need the haproxy stats to decide upon what to do.
     total_requests_seen, total_req_in_queue, current_sessions,
       time_requests_were_seen = get_application_load_stats(version_key)
