@@ -1,5 +1,6 @@
 """ Implements a Cloud Storage stub using an AppScale Cloud Storage server. """
 import base64
+import httplib
 import urlparse
 
 import requests
@@ -34,7 +35,7 @@ class AppScaleCloudStorageStub(object):
   def post_start_creation(self, filename, options):
     """Start object creation with a POST.
 
-    This implements the resumable upload XML API.
+    This uses the resumable upload XML API.
 
     Args:
       filename: gs filename of form /bucket/filename.
@@ -51,7 +52,9 @@ class AppScaleCloudStorageStub(object):
     options['x-goog-resumable'] = 'start'
 
     response = requests.post(url, headers=options)
-    if response.status_code != 201:
+
+    # The API should response to the initial create call with a 201.
+    if response.status_code != httplib.CREATED:
       raise InternalError(response.text)
 
     location = response.headers.get('Location')
@@ -70,7 +73,7 @@ class AppScaleCloudStorageStub(object):
   def put_continue_creation(self, token, content, content_range, last=False):
     """Continue object upload with PUTs.
 
-    This implements the resumable upload XML API.
+    This uses the resumable upload XML API.
 
     Args:
       token: upload token returned by post_start_creation.
@@ -95,10 +98,13 @@ class AppScaleCloudStorageStub(object):
                'Content-Range': range_header}
 
     response = requests.put(url, headers=headers)
+
+    # The API uses "308 Resume Incomplete" when the client needs to submit
+    # more chunks to complete the blob.
     if not last and response.status_code != 308:
       raise InternalError(response.text)
 
-    if last and response.status_code != 200:
+    if last and response.status_code not in (httplib.OK, httplib.CREATED):
       raise InternalError(response.text)
 
   def get_bucket(self,
@@ -171,10 +177,11 @@ class AppScaleCloudStorageStub(object):
     url = ''.join([self.location, filename])
     response = requests.delete(url)
 
-    if response.status_code == 204:
+    # The API uses a 204 to indicate that the delete was successful.
+    if response.status_code == httplib.NO_CONTENT:
       return True
 
-    if response.status_code == 404:
+    if response.status_code == httplib.NOT_FOUND:
       return False
 
     raise InternalError(response.text)
