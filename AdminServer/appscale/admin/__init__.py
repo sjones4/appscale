@@ -679,7 +679,7 @@ class VersionsHandler(BaseHandler):
     revision_key = VERSION_PATH_SEPARATOR.join(
       [project_id, service_id, version['id'], str(version['revision'])])
     hoster_node = '/apps/{}/{}'.format(revision_key, options.private_ip)
-    source_location = version['deployment']['zip']['sourceUrl']
+    source_location = utils.source_archive_path(project_id, service_id, version)
 
     md5 = yield self.thread_pool.submit(get_md5, source_location)
     try:
@@ -696,8 +696,7 @@ class VersionsHandler(BaseHandler):
       service_id: A string specifying a service ID.
       version: A dictionary containing version details.
     """
-    revision_key = VERSION_PATH_SEPARATOR.join(
-      [project_id, service_id, version['id'], str(version['revision'])])
+    revision_key = utils.application_revision(project_id, service_id, version)
     revision_node = '/apps/{}'.format(revision_key)
     hoster_node = '/'.join([revision_node, options.private_ip])
 
@@ -712,7 +711,7 @@ class VersionsHandler(BaseHandler):
     except (NotEmptyError, NoNodeError):
       pass
 
-    source_location = version['deployment']['zip']['sourceUrl']
+    source_location = utils.source_archive_path_for_revision(revision_key)
     try:
       os.remove(source_location)
     except OSError as error:
@@ -764,12 +763,28 @@ class VersionsHandler(BaseHandler):
     version = self.version_from_payload()
 
     version_exists = self.version_exists(project_id, service_id, version['id'])
-    revision_key = VERSION_PATH_SEPARATOR.join(
-      [project_id, service_id, version['id'], str(version['revision'])])
+    revision_key = utils.application_revision(project_id, service_id, version)
+
     try:
-      yield self.thread_pool.submit(
-        utils.extract_source, revision_key,
-        version['deployment']['zip']['sourceUrl'], version['runtime'])
+      version_source_url = version['deployment']['zip']['sourceUrl']
+      if not version_source_url.startswith("gs://"):
+        new_path = utils.rename_source_archive(project_id, service_id, version)
+        local_location = new_path
+        version['deployment']['zip']['sourceUrl'] = new_path
+      else:
+        local_location = utils.source_archive_path_for_revision(revision_key)
+        gcs_config_json, _ = yield self.thread_pool.submit(
+            self.zk_client.get, '/appscale/config/gcs')
+        try:
+          gcs_config = json.loads(gcs_config_json)
+        except NoNodeError:
+          raise CustomHTTPError(HTTPCodes.BAD_REQUEST,
+                                message='Source location uses gcs, but gcs not configured')
+        yield self.thread_pool.submit(utils.download_source,
+                                      gcs_config, version_source_url, local_location)
+
+      yield self.thread_pool.submit(utils.extract_source,
+                                    revision_key, local_location, version['runtime'])
     except IOError:
       message = '{} does not exist'.format(
         version['deployment']['zip']['sourceUrl'])
@@ -778,8 +793,7 @@ class VersionsHandler(BaseHandler):
       raise CustomHTTPError(HTTPCodes.BAD_REQUEST,
                             message=six.text_type(error))
 
-    new_path = utils.rename_source_archive(project_id, service_id, version)
-    version['deployment']['zip']['sourceUrl'] = new_path
+    # TODO:STEVE: copy from staging gcs location to an "appscale" owned bucket?
     yield self.identify_as_hoster(project_id, service_id, version)
 
     yield self.thread_pool.submit(self.version_update_lock.acquire)

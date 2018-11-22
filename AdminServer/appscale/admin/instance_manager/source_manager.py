@@ -1,12 +1,14 @@
 """ Fetches and prepares the source code for revisions. """
 
 import errno
+import json
 import logging
 import os
 import random
 import shutil
 
 from kazoo.exceptions import NodeExistsError
+from kazoo.exceptions import NoNodeError
 from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.options import options
@@ -22,7 +24,7 @@ from ..constants import (
   SOURCES_DIRECTORY,
   UNPACK_ROOT
 )
-from ..utils import extract_source
+from ..utils import (download_source, extract_source, source_archive_path_for_revision)
 
 logger = logging.getLogger(__name__)
 
@@ -115,29 +117,40 @@ class SourceManager(object):
     Raises:
       AlreadyHoster if local machine is hosting archive.
     """
+    local_source_archive = source_archive_path_for_revision(revision_key)
     hosts_with_archive = yield self.thread_pool.submit(
       self.zk_client.get_children, '/apps/{}'.format(revision_key))
-    assert hosts_with_archive, '{} has no hosters'.format(revision_key)
+    hosts_with_archive = hosts_with_archive or []
 
-    if options.private_ip in hosts_with_archive:
+    if (os.path.isfile(local_source_archive) and
+            options.private_ip in hosts_with_archive):
       raise AlreadyHoster('{} is already a hoster of {}'
                          .format(options.private_ip, revision_key))
 
-    host = random.choice(hosts_with_archive)
-    host_node = '/apps/{}/{}'.format(revision_key, host)
-    original_md5, _ = yield self.thread_pool.submit(
-      self.zk_client.get, host_node)
+    if not source_location.startswith("gs://"):
+      assert hosts_with_archive, '{} has no hosters'.format(revision_key)
+      host = random.choice(hosts_with_archive)
+      host_node = '/apps/{}/{}'.format(revision_key, host)
+      original_md5, _ = yield self.thread_pool.submit(
+          self.zk_client.get, host_node)
+      if os.path.isfile(local_source_archive):
+        md5 = yield self.thread_pool.submit(get_md5, local_source_archive)
+        if md5 == original_md5:
+          raise gen.Return(md5)
+        else:
+          logger.warning('Source MD5 does not match. Re-fetching archive.')
+      yield self.thread_pool.submit(fetch_file, host, local_source_archive)
+    else:
+      original_md5 = None
+      gcs_config_json, _ = yield self.thread_pool.submit(self.zk_client.get, '/appscale/config/gcs')
+      try:
+        gcs_config = json.loads(gcs_config_json)
+      except NoNodeError:
+        raise InvalidSource('Source location uses gcs, but gcs not configured')
+      yield self.thread_pool.submit(download_source, gcs_config, source_location, local_source_archive)
 
-    if os.path.isfile(source_location):
-      md5 = yield self.thread_pool.submit(get_md5, source_location)
-      if md5 == original_md5:
-        raise gen.Return(md5)
-
-      logger.warning('Source MD5 does not match. Re-fetching archive.')
-
-    yield self.thread_pool.submit(fetch_file, host, source_location)
-    md5 = yield self.thread_pool.submit(get_md5, source_location)
-    if md5 != original_md5:
+    md5 = yield self.thread_pool.submit(get_md5, local_source_archive)
+    if original_md5 and md5 != original_md5:
       raise InvalidSource('Source MD5 does not match')
 
     raise gen.Return(md5)
@@ -164,7 +177,7 @@ class SourceManager(object):
     Args:
       revision_key: A string specifying a revision key.
       location: A string specifying the location of the revision's source
-        archive.
+        remote archive location.
       runtime: A string specifying the revision's runtime.
     """
     source_extracted = False
@@ -177,8 +190,9 @@ class SourceManager(object):
       yield self.register_as_hoster(revision_key, md5)
 
     if not source_extracted:
-      yield self.thread_pool.submit(extract_source, revision_key, location,
-                                  runtime)
+      yield self.thread_pool.submit(extract_source, revision_key,
+                                    source_archive_path_for_revision(revision_key),
+                                    runtime)
 
     project_id = revision_key.split(VERSION_PATH_SEPARATOR)[0]
     if project_id == DASHBOARD_APP_ID:

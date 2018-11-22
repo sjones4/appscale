@@ -8,12 +8,14 @@ import os
 import shutil
 import socket
 import tarfile
+import urllib2
 
 from appscale.common.constants import HTTPCodes
 from appscale.common.constants import InvalidConfiguration
 from appscale.common.constants import VERSION_PATH_SEPARATOR
 from appscale.taskqueue import constants as tq_constants
 from appscale.taskqueue.constants import InvalidQueueConfiguration
+from contextlib import closing
 from kazoo.exceptions import NoNodeError
 
 from . import constants
@@ -175,6 +177,29 @@ def ensure_path(path):
     else:
       raise
 
+def resolve_source(gcs_config, source):
+  """ Convert a gs:// to an http:// url
+  """
+  return "{0}://{1}:{2}/{3}".format(
+      gcs_config.get('scheme', 'http'),
+      gcs_config.get('host', '127.0.0.1'),
+      gcs_config.get('port', 5000),
+      source.split("gs://")[1])
+
+def download_source(gcs_config, source, target):
+  """ Download a source archive to the given target location
+
+  Args:
+    gcs_config: A dict with gcs endpoint details (scheme, host, port)
+    source: The source url
+    target: The target file
+  Raises:
+    IOError if source archive does not exist.
+  """
+  source_url = resolve_source(gcs_config, source)
+  with closing(urllib2.urlopen(source_url, timeout=30)) as source_in:
+    with open(target, 'wb') as target_out:
+      target_out.write(source_in.read())
 
 def extract_source(revision_key, location, runtime):
   """ Unpacks an archive from a given location.
@@ -253,6 +278,43 @@ def port_is_open(host, port):
   return result == 0
 
 
+def application_revision(project_id, service_id, version):
+    """ Build the full revision string for an application version.
+
+    Args:
+      project_id: A string specifying a project ID.
+      service_id: A string specifying a service ID.
+      version: A dictionary containing version details.
+    Returns:
+      A string for the revision.
+    """
+    return VERSION_PATH_SEPARATOR.join(
+        [project_id, service_id, version['id'], str(version['revision'])])
+
+def source_archive_path(project_id, service_id, version):
+    """ Get path for an application versions source archive.
+
+    Args:
+      project_id: A string specifying a project ID.
+      service_id: A string specifying a service ID.
+      version: A dictionary containing version details.
+    Returns:
+      A string specifying the location for an archive.
+    """
+    return source_archive_path_for_revision(
+        application_revision(project_id, service_id, version))
+
+def source_archive_path_for_revision(revision):
+    """ Get path for an application versions source archive.
+
+    Args:
+      revision: The application revision.
+    Returns:
+      A string specifying the location for an archive.
+    """
+    filename = '{}.tar.gz'.format(revision)
+    return os.path.join(SOURCES_DIRECTORY, filename)
+
 def rename_source_archive(project_id, service_id, version):
   """ Renames the given source archive to keep track of it.
 
@@ -263,13 +325,13 @@ def rename_source_archive(project_id, service_id, version):
   Returns:
     A string specifying the new location of the archive.
   """
-  new_filename = VERSION_PATH_SEPARATOR.join(
-    [project_id, service_id, version['id'],
-     '{}.tar.gz'.format(version['revision'])])
-  new_location = os.path.join(SOURCES_DIRECTORY, new_filename)
-  os.rename(version['deployment']['zip']['sourceUrl'], new_location)
-  return new_location
-
+  source_url = version['deployment']['zip']['sourceUrl']
+  if os.path.isfile(source_url):
+    new_location = source_archive_path(project_id, service_id, version)
+    os.rename(source_url, new_location)
+    return new_location
+  else:
+    return source_url
 
 def remove_old_archives(project_id, service_id, version):
   """ Cleans up old revision archives.
@@ -281,7 +343,7 @@ def remove_old_archives(project_id, service_id, version):
   """
   prefix = VERSION_PATH_SEPARATOR.join(
     [project_id, service_id, version['id']])
-  current_name = os.path.basename(version['deployment']['zip']['sourceUrl'])
+  current_name = source_archive_path(project_id, service_id, version)
   old_sources = [os.path.join(SOURCES_DIRECTORY, archive) for archive
                  in os.listdir(SOURCES_DIRECTORY)
                  if archive.startswith(prefix) and archive < current_name]
