@@ -2966,7 +2966,8 @@ class DatastoreDistributed():
 
     # If we have less than the amount of entities we request there are no
     # more results for this query.
-    if count < self.get_limit(query):
+    if count < self.get_limit(query) or (query.has_limit() and
+                                         query.limit()==count):
       query_result.set_more_results(False)
 
     # If there were no results then we copy the last cursor so future queries
