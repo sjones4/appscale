@@ -440,6 +440,8 @@ class Djinn
   PARAMETER_DEFAULT = 1
   PARAMETER_SHOW = 2
   PARAMETERS_AND_CLASS = {
+    'aws_subnet_id' => [String, nil, true],
+    'aws_vpc_id' => [String, nil, true],
     'azure_subscription_id' => [String, nil, false],
     'azure_app_id' => [String, nil, false],
     'azure_app_secret_key' => [String, nil, false],
@@ -502,10 +504,17 @@ class Djinn
   ].freeze
 
   # The amount of memory in MB for each instance class.
-  INSTANCE_CLASSES = { F1: 128,
-                       F2: 256,
-                       F4: 512,
-                       F4_1G: 1024 }.freeze
+  INSTANCE_CLASSES = {
+    F1: 128,
+    F2: 256,
+    F4: 512,
+    F4_1G: 1024,
+    B1: 128,
+    B2: 256,
+    B4: 512,
+    B4_1G: 1024,
+    B8: 1024,
+  }.freeze
 
   # Creates a new Djinn, which holds all the information needed to configure
   # and deploy all the services on this node.
@@ -776,8 +785,8 @@ class Djinn
     # Now we can check if we have the needed roles to start the
     # deployment.
     all_roles.uniq!
-    ['compute', 'shadow', 'load_balancer', 'login', 'zookeeper',
-      'memcache', 'db_master', 'taskqueue_master'].each { |role|
+    ['compute', 'shadow', 'load_balancer', 'zookeeper', 'memcache',
+     'db_master', 'taskqueue_master'].each { |role|
       unless all_roles.include?(role)
         msg = "Error: layout is missing role #{role}."
         Djinn.log_error(msg)
@@ -4417,7 +4426,7 @@ HOSTS
     start_cmd << ' --verbose' if @options['verbose'].downcase == 'true'
     MonitInterface.start(:admin_server, start_cmd, nil,
                          {'PATH' => ENV['PATH']})
-    if my_node.is_shadow?
+    if my_node.is_load_balancer?
       Nginx.add_service_location('appscale-administration', my_node.private_ip,
                                  service_port, nginx_port, '/')
     end
@@ -4559,7 +4568,7 @@ HOSTS
     taskqueue_location = [get_load_balancer.private_ip,
                           TaskQueue::HAPROXY_PORT].join(':')
     source_archive = AppDashboard.prep(
-      my_public, my_private, PERSISTENT_MOUNT_POINT, datastore_location,
+      my_private, PERSISTENT_MOUNT_POINT, datastore_location,
       taskqueue_location)
 
     self.deploy_dashboard(source_archive)
@@ -4764,9 +4773,11 @@ HOSTS
     rsyslog_prop = ':syslogtag'
     rsyslog_version = Gem::Version.new(`rsyslogd -v`.split[1].chomp(','))
     rsyslog_prop = ':programname' if rsyslog_version < Gem::Version.new('8.12')
+    rsyslog_propval = "app_#{Digest::SHA1.hexdigest(version_key)[0...28]}"
 
     app_log_template = HelperFunctions.read_file(RSYSLOG_TEMPLATE_LOCATION)
     app_log_config = app_log_template.gsub('{property}', rsyslog_prop)
+    app_log_config = app_log_config.gsub('{property_value}', rsyslog_propval)
     app_log_config = app_log_config.gsub('{version}', version_key)
     unless existing_app_log_config == app_log_config
       Djinn.log_info("Installing log configuration for #{version_key}.")
