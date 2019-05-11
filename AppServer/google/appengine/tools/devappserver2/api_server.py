@@ -91,10 +91,11 @@ GLOBAL_API_LOCK = threading.RLock()
 # providing the context of a specific application.
 DEFAULT_API_SERVER_APP_ID = 'dev~app_id'
 
-def _execute_request(request):
+def _execute_request(wsgi_request, request):
   """Executes an API method call and returns the response object.
 
   Args:
+    wsgi_request: The WSGIRequestInfo for the request
     request: A remote_api_pb.Request object representing the API call e.g. a
         call to memcache.Get.
 
@@ -108,11 +109,6 @@ def _execute_request(request):
   """
   service = request.service_name()
   method = request.method()
-  if request.has_request_id():
-    request_id = request.request_id()
-  else:
-    logging.error('Received a request without request_id: %s', request)
-    request_id = None
 
   service_methods = remote_api_services.SERVICE_PB_MAP.get(service, {})
   request_class, response_class = service_methods.get(method, (None, None))
@@ -126,11 +122,12 @@ def _execute_request(request):
   service_stub = apiproxy_stub_map.apiproxy.GetStub(service)
 
   def make_request():
-    service_stub.MakeSyncCall(service,
-                              method,
-                              request_data,
-                              response_data,
-                              request_id)
+    with wsgi_request.request(os.environ, None) as request_id:
+      service_stub.MakeSyncCall(service,
+                                method,
+                                request_data,
+                                response_data,
+                                request_id)
 
   # If the service has not declared itself as threadsafe acquire
   # GLOBAL_API_LOCK.
@@ -145,9 +142,10 @@ def _execute_request(request):
 class APIServer(wsgi_server.WsgiServer):
   """Serves API calls over HTTP."""
 
-  def __init__(self, host, port, app_id):
+  def __init__(self, host, port, app_id, wsgi_request):
     self._app_id = app_id
     self._host = host
+    self._wsgi_request = wsgi_request
     super(APIServer, self).__init__((host, port), self)
 
   def start(self):
@@ -177,7 +175,7 @@ class APIServer(wsgi_server.WsgiServer):
       else:
         wsgi_input = environ['wsgi.input'].read(int(environ['CONTENT_LENGTH']))
       request.ParseFromString(wsgi_input)
-      api_response = _execute_request(request).Encode()
+      api_response = _execute_request(self._wsgi_request, request).Encode()
       response.set_response(api_response)
     except Exception, e:
       if isinstance(e, apiproxy_errors.ApplicationError):
@@ -321,7 +319,7 @@ def create_api_server(request_info, storage_path, options, app_id, app_root):
 
   # The APIServer must bind to localhost because that is what the runtime
   # instances talk to.
-  return APIServer('localhost', options.api_port, app_id)
+  return APIServer('localhost', options.api_port, app_id, request_info)
 
 
 def _clear_datastore_storage(datastore_path):
