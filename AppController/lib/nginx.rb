@@ -279,6 +279,8 @@ server {
 
     error_page 404 = /404.html;
 
+    include appscale-inc-server-https[.]conf;
+
     location = /reserved-channel-appscale-path {
       proxy_buffering    off;
       tcp_nodelay        on;
