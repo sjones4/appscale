@@ -816,6 +816,7 @@ class Module(object):
       host = '%s:%s' % (self.host, port)
     else:
       host = self.host
+    # TODO:STEVE test for blob upload with authenticated next
     environ = {constants.FAKE_IS_ADMIN_HEADER: '1',
                'CONTENT_LENGTH': str(len(body)),
                'PATH_INFO': url.path,

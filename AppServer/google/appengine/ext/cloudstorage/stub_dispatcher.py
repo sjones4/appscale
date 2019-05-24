@@ -70,7 +70,7 @@ def _urlmatcher_for_gcs_stub(url):
 
 
 
-URLMATCHERS_TO_FETCH_FUNCTIONS = [
+URLMATCHERS_TO_FETCH_FUNCTIONS = [  # TODO steve hook into gcs here?
     (_urlmatcher_for_gcs_stub, _urlfetch_to_gcs_stub)]
 
 

@@ -44,7 +44,7 @@ from google.appengine.api import apiproxy_stub_map
 from google.appengine.api import datastore
 from google.appengine.api import datastore_errors
 from google.appengine.api.blobstore import blobstore
-from google.appengine.ext.cloudstorage import cloudstorage_stub
+from google.appengine.ext.cloudstorage import cloudstorage_s3_stub
 from google.appengine.tools.devappserver2 import constants
 
 # Upload URL path.
@@ -259,12 +259,14 @@ class Application(object):
     Returns:
       datastore.Entity('__GsFileInfo__') associated with the upload.
     """
-    gs_stub = cloudstorage_stub.CloudStorageStub(self._blob_storage)
+    gs_stub = cloudstorage_s3_stub.CloudStorageS3Stub()
+    gs_options = {'Content-Type': content_type}
     blobkey = gs_stub.post_start_creation('/' + gs_filename,
-                                          {'content-type': content_type})
+                                          gs_options)
     content = blob_file.read()
-    return gs_stub.put_continue_creation(
-        blobkey, content, (0, len(content) - 1), len(content), filename)
+    return gs_stub.put_continue_creation(blobkey, content,
+                                         (0, len(content) - 1), len(content),
+                                         filename, gs_options)
 
   def _preprocess_data(self, content_type, blob_file,
                        filename, base64_encoding):
@@ -427,7 +429,7 @@ class Application(object):
         gs_filename = None
         if bucket_name:
           random_key = str(self._generate_blob_key())
-          gs_filename = '%s/fake-%s' % (bucket_name, random_key)
+          gs_filename = '%s/fake-%s' % (bucket_name, random_key)    # TODO:STEVE: gcs unfake
           headers[blobstore.CLOUD_STORAGE_OBJECT_HEADER] = (
               blobstore.GS_PREFIX + gs_filename)
         for key, value in headers.iteritems():
