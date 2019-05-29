@@ -312,6 +312,12 @@ installgems()
 postinstallnginx()
 {
     rm -fv /etc/nginx/sites-enabled/default
+
+    NGINX_APPSCALE_INC="/etc/nginx/snippets/appscale-snippets"
+    mkdir -p ${NGINX_APPSCALE_INC}
+    cp -v \
+      ${APPSCALE_HOME_RUNTIME}/AppController/scripts/nginx-snippets/*.conf \
+      ${NGINX_APPSCALE_INC}/
 }
 
 installsolr()

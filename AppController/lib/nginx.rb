@@ -114,17 +114,8 @@ module Nginx
     never_secure_locations = ""
 
     location_params = \
-        "\n\tproxy_set_header      X-Real-IP $remote_addr;" \
-        "\n\tproxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;" \
-        "\n\tproxy_set_header      X-Forwarded-Proto $scheme;" \
-        "\n\tproxy_set_header      X-Forwarded-Ssl $ssl;" \
-        "\n\tproxy_set_header      Host $http_host;" \
-        "\n\tproxy_redirect        off;" \
+        "\n\tinclude snippets/appscale-snippets/app-location-params.conf;" \
         "\n\tproxy_pass            http://gae_#{version_key};" \
-        "\n\tproxy_connect_timeout 600;" \
-        "\n\tproxy_read_timeout    600;" \
-        "\n\tclient_body_timeout   600;" \
-        "\n\tclient_max_body_size  2G;" \
         "\n    }\n"
 
     combined_http_locations = ""
@@ -185,17 +176,9 @@ module Nginx
     if language == 'java'
       java_blobstore_redirection = <<JAVA_BLOBSTORE_REDIRECTION
 location ~ /_ah/upload/.* {
+      include snippets/appscale-snippets/app-upload-location-params.conf;
       proxy_set_header      X-Appengine-Inbound-Appid #{version_key.split('_').first};
-      proxy_set_header      X-Real-IP $remote_addr;
-      proxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header      X-Forwarded-Proto $scheme;
-      proxy_set_header      X-Forwarded-Ssl $ssl;
-      proxy_set_header      Host $http_host;
       proxy_pass            http://#{HelperFunctions::GAE_PREFIX}#{version_key}_blobstore;
-      proxy_connect_timeout 600;
-      proxy_read_timeout    600;
-      client_body_timeout   600;
-      client_max_body_size  2G;
     }
 JAVA_BLOBSTORE_REDIRECTION
     end
@@ -230,9 +213,7 @@ server {
     access_log  off;
     error_log   #{NGINX_LOG_PATH}/appscale-#{version_key}.error.log;
 
-    ignore_invalid_headers off;
-    rewrite_log off;
-    error_page 404 = /404.html;
+    include snippets/appscale-snippets/app-server-params.conf;
     set $cache_dir #{HelperFunctions::VERSION_ASSETS_DIR}/#{version_key};
 
     # If they come here using HTTPS, bounce them to the correct scheme.
@@ -254,20 +235,14 @@ server {
 
 server {
     listen #{https_port} default_server;
-    ssl on;
-    ssl_protocols TLSv1 TLSv1.1 TLSv1.2;  # don't use SSLv3 ref: POODLE
-    ssl_certificate     #{NGINX_PATH}/mycert.pem;
-    ssl_certificate_key #{NGINX_PATH}/mykey.pem;
+    include snippets/appscale-snippets/common-server-ssl-params.conf;
     return 444;
 }
 
 server {
     listen      #{https_port};
     server_name #{server_name};
-    ssl on;
-    ssl_protocols TLSv1 TLSv1.1 TLSv1.2;  # don't use SSLv3 ref: POODLE
-    ssl_certificate     #{NGINX_PATH}/mycert.pem;
-    ssl_certificate_key #{NGINX_PATH}/mykey.pem;
+    include snippets/appscale-snippets/common-server-ssl-params.conf;
 
     # If they come here using HTTP, bounce them to the correct scheme.
     error_page 400 https://$host:$server_port$request_uri;
@@ -279,11 +254,8 @@ server {
     access_log  off;
     error_log   #{NGINX_LOG_PATH}/appscale-#{version_key}.error.log;
 
-    ignore_invalid_headers off;
-    rewrite_log off;
+    include snippets/appscale-snippets/app-server-params.conf;
     set $cache_dir #{HelperFunctions::VERSION_ASSETS_DIR}/#{version_key};
-
-    error_page 404 = /404.html;
 
     location = /reserved-channel-appscale-path {
       proxy_buffering    off;
@@ -400,24 +372,12 @@ CONFIG
 server {
     listen #{nginx_port};
 
-    ssl on;
-    ssl_protocols TLSv1 TLSv1.1 TLSv1.2;  # don't use SSLv3 ref: POODLE
-    ssl_certificate     #{NGINX_PATH}/mycert.pem;
-    ssl_certificate_key #{NGINX_PATH}/mykey.pem;
+    include snippets/appscale-snippets/common-server-ssl-params.conf;
 
     #access_log #{NGINX_LOG_PATH}/#{service_name}.access.log upstream;
     #error_log  #{NGINX_LOG_PATH}/#{service_name}.error.log;
-    access_log  off;
-    error_log   /dev/null crit;
 
-    ignore_invalid_headers off;
-    rewrite_log off;
-
-    # If they come here using HTTP, bounce them to the correct scheme.
-    error_page 400 https://$host:$server_port$request_uri;
-    error_page 497 https://$host:$server_port$request_uri;
-
-    error_page 502 /502.html;
+    include snippets/appscale-snippets/service-server-params.conf;
 
     # Locations:
 CONFIG
