@@ -232,6 +232,8 @@ server {
     # If they come here using HTTPS, bounce them to the correct scheme.
     error_page 400 http://$host:$server_port$request_uri;
 
+    include appscale-inc-server-https[.]conf;
+
     location = /reserved-channel-appscale-path {
       proxy_buffering    off;
       tcp_nodelay        on;

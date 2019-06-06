@@ -1,11 +1,46 @@
 """ Implements a Cloud Storage stub using an AppScale Cloud Storage server. """
 import base64
+import datetime
 import httplib
 import urlparse
 
 import requests
 
+from google.appengine.api import datastore
+from google.appengine.api.blobstore import blobstore_stub
 from google.appengine.ext.cloudstorage import common
+
+
+class _GCSS3FileInfoKey_(object):
+    _encoder = blobstore_stub.BlobstoreServiceStub.CreateEncodedGoogleStorageKey
+
+    def name(self):
+        return self._encoder('{}/{}'.format(self.bucket_name, self.key_name))
+
+
+class _GCSS3FileInfo_(object):
+    """Store GCS specific info.
+
+    GCS allows user to define arbitrary metadata via header x-goog-meta-foo: bar
+    These headers are returned when user does a GET or HEAD on the object.
+
+    Key name is blobkey.
+    """
+
+    def __init__(self):
+        self.bucket_name = None
+        self.key_name = None
+        self.etag = None
+        self.creation = datetime.datetime.utcnow()
+        self.size = None
+        self.finalized = False
+        self.next_offset = -1
+
+    def key(self):
+        encoded_key = _GCSS3FileInfoKey_()
+        encoded_key.bucket_name = self.bucket_name
+        encoded_key.key_name = self.key_name
+        return encoded_key
 
 
 class InternalError(Exception):
@@ -63,14 +98,15 @@ class AppScaleCloudStorageStub(object):
 
     query = urlparse.urlparse(location).query
     try:
-      token = urlparse.parse_qs(query)['upload_id']
+      token = urlparse.parse_qs(query)['upload_id'][0]
     except KeyError:
       raise InternalError('Upload ID missing from response')
 
     # To keep this class stateless, include the filename with the token.
     return base64.b64encode(':'.join([filename, token]))
 
-  def put_continue_creation(self, token, content, content_range, last=False):
+  def put_continue_creation(self, token, content, content_range,
+                            length=None, _upload_filename=None):
     """Continue object upload with PUTs.
 
     This uses the resumable upload XML API.
@@ -80,12 +116,16 @@ class AppScaleCloudStorageStub(object):
       content: object content.
       content_range: a (start, end) tuple specifying the content range of this
         chunk. Both are inclusive according to XML API.
-      last: True if this is the last chunk of file content.
+      length: file length, if this is the last chunk of file content.
+      _upload_filename: internal use. Might be removed any time! This is
+        used by blobstore to pass in the upload filename from user.
 
     Raises:
       ValueError: if token is invalid.
     """
+    last = length is not None
     filename, token = base64.b64decode(token).split(':', 1)
+    common.validate_file_path(filename)
 
     url = ''.join([self.location, filename, '?upload_id=', token])
 
@@ -94,18 +134,42 @@ class AppScaleCloudStorageStub(object):
     if last:
       total_size = end + 1
     range_header = 'bytes {}-{}/{}'.format(start, end, total_size)
-    headers = {'Content-Length': len(content),
+    headers = {'Content-Length': str(len(content)),
                'Content-Range': range_header}
 
-    response = requests.put(url, headers=headers)
+    response = requests.put(url, headers=headers, data=content)
 
     # The API uses "308 Resume Incomplete" when the client needs to submit
     # more chunks to complete the blob.
     if not last and response.status_code != 308:
       raise InternalError(response.text)
 
-    if last and response.status_code not in (httplib.OK, httplib.CREATED):
-      raise InternalError(response.text)
+    if last:
+      if response.status_code not in (httplib.OK, httplib.CREATED):
+        raise InternalError(response.text)
+
+      bucket_name_end = filename.find('/', 1)
+      bucket_name = filename[1:bucket_name_end]
+      key_name = filename[bucket_name_end + 1:]
+
+      gcs_file = _GCSS3FileInfo_()
+      gcs_file.bucket_name = bucket_name
+      gcs_file.key_name = key_name
+      gcs_file.size = len(content)
+      gcs_file.finalized = True
+
+      blob_info = datastore.Entity('__BlobInfo__',
+                                   name=gcs_file.key().name(),
+                                   namespace='')
+      blob_info['creation'] = gcs_file.creation
+      blob_info['filename'] = _upload_filename
+      blob_info['md5_hash'] = gcs_file.etag
+      blob_info['size'] = gcs_file.size
+      datastore.Put(blob_info)
+
+      return gcs_file
+    else:
+      return None
 
   def get_bucket(self,
                  bucketpath,
