@@ -844,9 +844,12 @@ class Module(object):
                'wsgi.multithread': True,
                'wsgi.multiprocess': True,
                'wsgi.input': cStringIO.StringIO(body)}
-    if fake_login:
-      environ[constants.FAKE_LOGGED_IN_HEADER] = '1'
     util.put_headers_in_environ(headers, environ)
+    if fake_login:
+      environ[constants.FAKE_IS_ADMIN_HEADER] = login.fake_admin()
+      environ[constants.FAKE_LOGGED_IN_HEADER] = '1'
+    elif constants.FAKE_LOGGED_IN_HEADER in environ:
+      del environ[constants.FAKE_LOGGED_IN_HEADER]
     environ['HTTP_HOST'] = host
     return environ
 

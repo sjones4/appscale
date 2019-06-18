@@ -48,6 +48,8 @@ from google.appengine.api.blobstore import blobstore
 from google.appengine.ext.cloudstorage import (
     appscale_cloud_storage, cloudstorage_stub)
 from google.appengine.tools.devappserver2 import constants
+from google.appengine.tools.devappserver2 import login
+
 
 # Upload URL path.
 UPLOAD_URL_PATH = '_ah/upload/'
@@ -584,7 +586,7 @@ class Application(object):
       environ['QUERY_STRING'] = parsed_url.query
 
     # The user is always an administrator for the forwarded request.
-    environ[constants.FAKE_IS_ADMIN_HEADER] = '1'
+    environ[constants.FAKE_IS_ADMIN_HEADER] = login.fake_admin()
 
     # Set the wsgi variables
     environ['wsgi.input'] = cStringIO.StringIO(content_text)
