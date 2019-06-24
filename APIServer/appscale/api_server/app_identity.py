@@ -1,5 +1,6 @@
 """ Implements the App Identity API. """
 
+import json
 import logging
 
 from kazoo.exceptions import KazooException
@@ -58,6 +59,12 @@ class AppIdentityService(BaseService):
         self.project_id = project_id
 
         self._zk_client = zk_client
+        self._project_node = '/appscale/projects/{}'.format(
+            self.project_id)
+        self._default_gcs_bucket_name = self.DEFAULT_GCS_BUCKET_NAME
+        self._zk_client.DataWatch(self._project_node,
+                                  self._update_default_gcs_bucket_name)
+
         self._key_node = '/appscale/projects/{}/private_key'.format(
             self.project_id)
         self._key = None
@@ -69,6 +76,14 @@ class AppIdentityService(BaseService):
         self._zk_client.ensure_path(self._certs_node)
         self._certs = []
         self._zk_client.ChildrenWatch(self._certs_node, self._update_certs)
+
+    def get_default_gcs_bucket_name(self):
+        """ Retrieves the default gcs bucket name for the project.
+
+        Returns:
+            The default gcs bucket name for the project.
+        """
+        return self._default_gcs_bucket_name
 
     def get_public_certificates(self):
         """ Retrieves a list of valid public certificates for the project.
@@ -138,7 +153,7 @@ class AppIdentityService(BaseService):
                 '{} is not configured'.format(service_account_id))
 
         if (service_account_name is not None and
-            service_account_name != self._key.key_name):
+                service_account_name != self._key.key_name):
             raise UnknownError(
                 '{} is not configured'.format(service_account_name))
 
@@ -221,9 +236,30 @@ class AppIdentityService(BaseService):
             response.access_token = token.token
             response.expiration_time = token.expiration_time
         elif method == 'GetDefaultGcsBucketName':
-            response.default_gcs_bucket_name = self.DEFAULT_GCS_BUCKET_NAME
+            try:
+                name = self.get_default_gcs_bucket_name()
+                response.default_gcs_bucket_name = name
+            except UnknownError as error:
+                logger.exception('Unable to get default gcs bucket name')
+                raise ApplicationError(service_pb.UNKNOWN_ERROR, str(error))
 
         return response.SerializeToString()
+
+    def _update_default_gcs_bucket_name(self, new_data, _):
+        """ Updates default gcs bucket name from project configuration.
+
+        Args:
+            new_data: A JSON string containing the project details.
+        """
+        _new_bucket_name = self.DEFAULT_GCS_BUCKET_NAME
+        if new_data:
+            try:
+                project = json.loads(new_data)
+                if 'defaultBucket' in project:
+                    _new_bucket_name = project['defaultBucket']
+            except ValueError:
+                _new_bucket_name = self._default_gcs_bucket_name
+        self._default_gcs_bucket_name = _new_bucket_name
 
     def _remove_cert(self, cert):
         """ Removes a certificate node.

@@ -242,6 +242,8 @@ server {
     # If they come here using HTTPS, bounce them to the correct scheme.
     error_page 400 http://$host:$server_port$request_uri;
 
+    include appscale-inc-server-https[.]conf;
+
     location = /reserved-channel-appscale-path {
       proxy_buffering    off;
       tcp_nodelay        on;
@@ -288,6 +290,8 @@ server {
     set $cache_dir #{HelperFunctions::VERSION_ASSETS_DIR}/#{version_key};
 
     error_page 404 = /404.html;
+
+    include appscale-inc-server-https[.]conf;
 
     location = /reserved-channel-appscale-path {
       proxy_buffering    off;
