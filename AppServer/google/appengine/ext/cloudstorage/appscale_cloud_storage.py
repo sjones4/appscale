@@ -2,13 +2,13 @@
 import base64
 import datetime
 import httplib
-import urlparse
-
 import requests
+import urlparse
 
 from google.appengine.api import datastore
 from google.appengine.api.blobstore import blobstore_stub
 from google.appengine.ext.cloudstorage import common
+from xml.etree import ElementTree as ETree
 
 
 class _GCSS3FileInfoKey_(object):
@@ -175,22 +175,66 @@ class AppScaleCloudStorageStub(object):
                  bucketpath,
                  prefix,
                  marker,
-                 max_keys):
+                 max_keys,
+                 delimiter):
     """Get bucket listing with a GET.
 
     Args:
       bucketpath: gs bucket path of form '/bucket'
-      prefix: prefix to limit listing.
-      marker: a str after which to start listing.
-      max_keys: max size of listing.
+      prefix: prefix to limit listing
+      marker: a str after which to start listing
+      max_keys: max size of listing
+      delimiter: delimiter for directory
 
     See https://developers.google.com/storage/docs/reference-methods#getbucket
     for details.
 
     Returns:
-      A list of CSFileStat sorted by filename.
+      A tuple of (a list of GCSFileStat for files or directories sorted by
+      filename, next_marker to use as next marker, is_truncated boolean to
+      indicate if there are more results satisfying query).
     """
-    raise NotImplementedError()
+    common.validate_bucket_path(bucketpath)
+
+    url = ''.join([self.location, bucketpath])
+    params_raw = {
+        'prefix': prefix,
+        'marker': marker,
+        'max-keys': max_keys,
+        'delimiter': delimiter
+    }
+    params = {}
+    params.update({key: str(val) for key, val in
+                   params_raw.items() if val is not None})
+    response = requests.get(url, params=params)
+
+    result = set()
+    next_marker = None
+    truncated = False
+    if response.status_code == httplib.OK:
+      response_tr = ETree.fromstring(response.text)
+      ns = {'s3': 'http://doc.s3.amazonaws.com/2006-03-01'}
+      next_marker = response_tr.findtext('s3:NextMarker', namespaces=ns)
+      truncated_text = response_tr.findtext('s3:IsTruncated', namespaces=ns)
+      truncated = truncated_text == 'true'
+      for content_el in response_tr.findall('s3:Contents', namespaces=ns):
+        key_text = content_el.findtext('s3:Key', namespaces=ns)
+        last_modified_text = content_el.findtext('s3:LastModified',
+                                                 namespaces=ns)
+        etag_text = content_el.findtext('s3:ETag', namespaces=ns)
+        size_text = content_el.findtext('s3:Size', namespaces=ns)
+        result.add(common.GCSFileStat(
+            filename=''.join([bucketpath, '/', key_text]),
+            st_size=int(size_text),
+            st_ctime=common.dt_str_to_posix(last_modified_text),
+            etag=etag_text.strip('"')))
+
+    result = list(result)
+    result.sort()
+    if not truncated:
+      next_marker = None
+
+    return result, next_marker, truncated
 
   def get_object(self, filename, start=0, end=None):
     """Get file content with a GET.
@@ -225,7 +269,23 @@ class AppScaleCloudStorageStub(object):
     Returns:
       A CSFileStat object containing file stat. None if file doesn't exist.
     """
-    raise NotImplementedError()
+    common.validate_file_path(filename)
+
+    url = ''.join([self.location, filename])
+    response = requests.head(url)
+
+    if response.status_code == httplib.OK:
+        content_length_text = response.headers.get('Content-Length')
+        content_type_text = response.headers.get('Content-Type')
+        last_modified_text = response.headers.get('Last-Modified')
+        etag_text = response.headers.get('ETag')
+        return common.GCSFileStat(
+            filename=filename,
+            st_size=int(content_length_text),
+            etag=etag_text.strip('"'),
+            st_ctime=common.http_time_to_posix(last_modified_text),
+            content_type=content_type_text)
+    return None
 
   def delete_object(self, filename):
     """Delete file with a DELETE.
