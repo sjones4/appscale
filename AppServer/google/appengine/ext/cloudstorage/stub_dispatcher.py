@@ -71,9 +71,16 @@ def _urlmatcher_for_gcs_stub(url):
   return host == common.LOCAL_API_HOST
 
 
+def _urlmatcher_for_local_gcs_stub(url):
+    """Determines whether a url should be handled by gcs stub for local
+       endpoint."""
+    _, host, _, _, _ = urlparse.urlsplit(url)
+    return host == 'storage.googleapis.com' and os.getenv('GCS_HOST')
+
 
 URLMATCHERS_TO_FETCH_FUNCTIONS = [
-    (_urlmatcher_for_gcs_stub, _urlfetch_to_gcs_stub)]
+    (_urlmatcher_for_gcs_stub, _urlfetch_to_gcs_stub),
+    (_urlmatcher_for_local_gcs_stub, _urlfetch_to_gcs_stub)]
 
 
 class _FakeUrlFetchResult(object):
