@@ -1,3 +1,4 @@
+import base64
 import datetime
 import logging
 import os
@@ -7,26 +8,25 @@ import sys
 import threading
 import time
 
+from kazoo.exceptions import NoNodeError
 from tornado import gen
-
-from appscale.datastore.utils import tornado_synchronous
-
-import appscale_datastore_batch
-import dbconstants
-import utils
+from tornado.ioloop import IOLoop
 
 from appscale.common import appscale_info
 from appscale.common import constants
 from appscale.common.unpackaged import APPSCALE_PYTHON_APPSERVER
 from appscale.common.unpackaged import DASHBOARD_DIR
-from . import helper_functions
-from .cassandra_env import cassandra_interface
-from .datastore_distributed import DatastoreDistributed
-from .index_manager import IndexManager
-from .utils import get_composite_indexes_rows
-from .zkappscale import zktransaction as zk
-from .zkappscale.entity_lock import EntityLock
-from .zkappscale.transaction_manager import TransactionManager
+from appscale.datastore import appscale_datastore_batch
+from appscale.datastore import dbconstants
+from appscale.datastore import helper_functions
+from appscale.datastore import utils
+from appscale.datastore.datastore_distributed import DatastoreDistributed
+from appscale.datastore.fdb.fdb_datastore import FDBDatastore
+from appscale.datastore.index_manager import IndexManager
+from appscale.datastore.utils import (
+    tornado_synchronous, UnprocessedQueryResult)
+from appscale.datastore.zkappscale.entity_lock import EntityLock
+from appscale.datastore.zkappscale import zktransaction as zk
 
 sys.path.append(APPSCALE_PYTHON_APPSERVER)
 from google.appengine.api import apiproxy_stub_map
@@ -34,36 +34,16 @@ from google.appengine.api import datastore_distributed
 from google.appengine.api.memcache import memcache_distributed
 from google.appengine.datastore import datastore_pb
 from google.appengine.datastore import entity_pb
+from google.appengine.datastore.datastore_pbs import (
+    get_entity_converter)
 from google.appengine.datastore.datastore_query import Cursor
 from google.appengine.ext import db
+from google.appengine.ext.db import Key
 from google.appengine.ext.db import stats
 from google.appengine.ext.db import metadata
 from google.appengine.api import datastore_errors
 
-sys.path.append(os.path.join(DASHBOARD_DIR, 'lib'))
-from dashboard_logs import RequestLogLine
-
 logger = logging.getLogger(__name__)
-
-
-class TaskName(db.Model):
-  """ A datastore model for tracking task names in order to prevent
-  tasks with the same name from being enqueued repeatedly.
-
-  Attributes:
-    timestamp: The time the task was enqueued.
-  """
-  STORED_KIND_NAME = "__task_name__"
-  timestamp = db.DateTimeProperty(auto_now_add=True)
-  queue = db.StringProperty(required=True)
-  state = db.StringProperty(required=True)
-  endtime = db.DateTimeProperty()
-  app_id = db.StringProperty(required=True)
-
-  @classmethod
-  def kind(cls):
-    """ Kind name override. """
-    return cls.STORED_KIND_NAME
 
 
 class DatastoreGroomer(threading.Thread):
@@ -95,9 +75,6 @@ class DatastoreGroomer(threading.Thread):
   # Do not generate stats for AppScale internal apps.
   APPSCALE_APPLICATIONS = ['apichecker', 'appscaledashboard']
 
-  # A sentinel value to signify that this app does not have composite indexes.
-  NO_COMPOSITES = "NO_COMPS_INDEXES_HERE"
-
   # The path in ZooKeeper where the groomer state is stored.
   GROOMER_STATE_PATH = '/appscale/groomer_state'
 
@@ -107,23 +84,11 @@ class DatastoreGroomer(threading.Thread):
   # The ID for the task to clean up entities.
   CLEAN_ENTITIES_TASK = 'entities'
 
-  # The ID for the task to clean up ascending indices.
-  CLEAN_ASC_INDICES_TASK = 'asc-indices'
-
-  # The ID for the task to clean up descending indices.
-  CLEAN_DSC_INDICES_TASK = 'dsc-indices'
-
-  # The ID for the task to clean up kind indices.
-  CLEAN_KIND_INDICES_TASK = 'kind-indices'
-
   # The ID for the task to clean up old logs.
   CLEAN_LOGS_TASK = 'logs'
 
   # The ID for the task to clean up old tasks.
   CLEAN_TASKS_TASK = 'tasks'
-
-  # The task ID for populating indexes with the scatter property.
-  POPULATE_SCATTER = 'populate-scatter'
 
   # Log progress every time this many seconds have passed.
   LOG_PROGRESS_FREQUENCY = 60 * 5
@@ -133,26 +98,19 @@ class DatastoreGroomer(threading.Thread):
 
     Args:
       zk: ZooKeeper client.
-      table_name: The database used (ie, cassandra)
+      table_name: Ignored, this groomer is for foundationdb
       ds_path: The connection path to the datastore_server.
     """
     logger.info("Logging started")
 
     threading.Thread.__init__(self)
     self.zoo_keeper = zoo_keeper
-    self.table_name = table_name
-    self.db_access = None
     self.ds_access = None
     self.datastore_path = ds_path
     self.stats = {}
     self.namespace_info = {}
     self.num_deletes = 0
     self.entities_checked = 0
-    self.journal_entries_cleaned = 0
-    self.index_entries_checked = 0
-    self.index_entries_delete_failures = 0
-    self.index_entries_cleaned = 0
-    self.scatter_prop_vals_populated = 0
     self.last_logged = time.time()
     self.groomer_state = []
 
@@ -190,463 +148,68 @@ class DatastoreGroomer(threading.Thread):
     """
     return self.zoo_keeper.get_lock_with_path(zk.DS_GROOM_LOCK_PATH)
 
+  def get_projects_from_zookeeper(self):
+      """ Wrapper function for getting list of projects from zookeeper. """
+      try:
+          return sorted(self.zoo_keeper.handle.get_children('/appscale/projects'))
+      except NoNodeError:
+          return []
+
   def get_entity_batch(self, last_key):
     """ Gets a batch of entites to operate on.
 
     Args:
       last_key: The last key from a previous query.
     Returns:
-      A list of entities.
+      A list of encoded entities.
     """
-    return self.db_access.range_query_sync(
-      dbconstants.APP_ENTITY_TABLE, dbconstants.APP_ENTITY_SCHEMA,
-      last_key, "", self.BATCH_SIZE, start_inclusive=False)
+    app_id = ''
+    key = None
+    if last_key:
+      key = Key(last_key)
+      app_id = key.app()
+      found_app = False
+
+    for project_app_id in self.get_projects_from_zookeeper():
+      if project_app_id >= app_id:
+        if project_app_id > app_id:
+            key = None  # clear key that was for previous app
+
+        logger.debug('Getting entity batch for project {} from key {}'.format(project_app_id, key))
+        batch = self.results_batch(project_app_id, key)
+        if batch:
+          logger.debug('Got entity batch for project {} of size {}'.format(project_app_id, str(len(batch))))
+          return batch
+
+    return None
+
+  def results_batch(self, app_id, last_key):
+    # Returns:
+    #   ordered list of encoded entities
+    query = datastore_pb.Query()
+    query.set_app(app_id)
+    query.set_limit(self.BATCH_SIZE)
+
+    if last_key:
+      filter = query.add_filter()
+      filter.set_op(3)  # >
+      prop = filter.add_property()
+      prop.set_multiple(False)
+      prop.set_name('__key__')
+      value = prop.mutable_value()
+      get_entity_converter().v3_reference_to_v3_property_value(last_key._ToPb(), value)
+
+    clone_qr_pb = UnprocessedQueryResult()
+    tornado_synchronous(self.ds_access._dynamic_run_query)(query, clone_qr_pb)
+    # TODO do we need to filter these results?
+    logger.info("Results batch {}".format(str(clone_qr_pb)))
+    return clone_qr_pb.result_list()
 
   def reset_statistics(self):
     """ Reinitializes statistics. """
     self.stats = {}
     self.namespace_info = {}
     self.num_deletes = 0
-    self.journal_entries_cleaned = 0
-
-  def hard_delete_row(self, row_key):
-    """ Does a hard delete on a given row key to the entity
-        table.
-
-    Args:
-      row_key: A str representing the row key to delete.
-    Returns:
-      True on success, False otherwise.
-    """
-    try:
-      self.db_access.batch_delete_sync(dbconstants.APP_ENTITY_TABLE, [row_key])
-    except dbconstants.AppScaleDBConnectionError, db_error:
-      logger.error("Error hard deleting key {0}-->{1}".format(
-        row_key, db_error))
-      return False
-    except Exception, exception:
-      logger.error("Caught unexcepted exception {0}".format(exception))
-      return False
-
-    return True
-
-  def fetch_entity_dict_for_references(self, references):
-    """ Fetches a dictionary of valid entities for a list of references.
-
-    Args:
-      references: A list of index references to entities.
-    Returns:
-      A dictionary of validated entities.
-    """
-    keys = []
-    for item in references:
-      keys.append(item.values()[0][self.ds_access.INDEX_REFERENCE_COLUMN])
-    keys = list(set(keys))
-    entities = self.db_access.batch_get_entity_sync(
-      dbconstants.APP_ENTITY_TABLE, keys, dbconstants.APP_ENTITY_SCHEMA)
-
-    # The datastore needs to know the app ID. The indices could be scattered
-    # across apps.
-    entities_by_app = {}
-    for key in entities:
-      app = key.split(self.ds_access._SEPARATOR)[0]
-      if app not in entities_by_app:
-        entities_by_app[app] = {}
-      entities_by_app[app][key] = entities[key]
-
-    entities = {}
-    for app in entities_by_app:
-      app_entities = entities_by_app[app]
-      for key in keys:
-        if key not in app_entities:
-          continue
-        if dbconstants.APP_ENTITY_SCHEMA[0] not in app_entities[key]:
-          continue
-        entities[key] = app_entities[key][dbconstants.APP_ENTITY_SCHEMA[0]]
-    return entities
-
-  def guess_group_from_table_key(self, entity_key):
-    """ Construct a group reference based on an entity key.
-
-    Args:
-      entity_key: A string specifying an entity table key.
-    Returns:
-      An entity_pb.Reference object specifying the entity group.
-    """
-    project_id, namespace, path = entity_key.split(dbconstants.KEY_DELIMITER)
-
-    group = entity_pb.Reference()
-    group.set_app(project_id)
-    if namespace:
-      group.set_name_space(namespace)
-
-    mutable_path = group.mutable_path()
-    first_element = mutable_path.add_element()
-    encoded_first_element = path.split(dbconstants.KIND_SEPARATOR)[0]
-    kind, id_ = encoded_first_element.split(dbconstants.ID_SEPARATOR, 1)
-    first_element.set_type(kind)
-
-    # At this point, there's no way to tell if the ID was originally a name,
-    # so this is a guess.
-    try:
-      first_element.set_id(int(id_))
-    except ValueError:
-      first_element.set_name(id_)
-
-    return group
-
-  @tornado_synchronous
-  @gen.coroutine
-  def lock_and_delete_indexes(self, references, direction, entity_key):
-    """ For a list of index entries that have the same entity, lock the entity
-    and delete the indexes.
-
-    Since another process can update an entity after we've determined that
-    an index entry is invalid, we need to re-check the index entries after
-    locking their entity key.
-
-    Args:
-      references: A list of references to an entity.
-      direction: The direction of the index.
-      entity_key: A string containing the entity key.
-    """
-    if direction == datastore_pb.Query_Order.ASCENDING:
-      table_name = dbconstants.ASC_PROPERTY_TABLE
-    else:
-      table_name = dbconstants.DSC_PROPERTY_TABLE
-
-    group_key = self.guess_group_from_table_key(entity_key)
-    entity_lock = EntityLock(self.zoo_keeper.handle, [group_key])
-    with entity_lock:
-      entities = self.fetch_entity_dict_for_references(references)
-
-      refs_to_delete = []
-      for reference in references:
-        index_elements = reference.keys()[0].split(self.ds_access._SEPARATOR)
-        prop = index_elements[self.ds_access.PROP_NAME_IN_SINGLE_PROP_INDEX]
-        if not self.ds_access._DatastoreDistributed__valid_index_entry(
-          reference, entities, direction, prop):
-          refs_to_delete.append(reference.keys()[0])
-
-      logger.debug('Removing {} indexes starting with {}'.
-        format(len(refs_to_delete), [refs_to_delete[0]]))
-      try:
-        self.db_access.batch_delete_sync(
-          table_name, refs_to_delete, column_names=dbconstants.PROPERTY_SCHEMA)
-        self.index_entries_cleaned += len(refs_to_delete)
-      except Exception:
-        logger.exception('Unable to delete indexes')
-        self.index_entries_delete_failures += 1
-
-  @tornado_synchronous
-  @gen.coroutine
-  def lock_and_delete_kind_index(self, reference):
-    """ For a list of index entries that have the same entity, lock the entity
-    and delete the indexes.
-
-    Since another process can update an entity after we've determined that
-    an index entry is invalid, we need to re-check the index entries after
-    locking their entity key.
-
-    Args:
-      reference: A dictionary containing a kind reference.
-    """
-    table_name = dbconstants.APP_KIND_TABLE
-    entity_key = reference.values()[0].values()[0]
-
-    group_key = self.guess_group_from_table_key(entity_key)
-    entity_lock = EntityLock(self.zoo_keeper.handle, [group_key])
-    with entity_lock:
-      entities = self.fetch_entity_dict_for_references([reference])
-      if entity_key not in entities:
-        index_to_delete = reference.keys()[0]
-        logger.debug('Removing {}'.format([index_to_delete]))
-        try:
-          self.db_access.batch_delete_sync(
-            table_name, [index_to_delete],
-            column_names=dbconstants.APP_KIND_SCHEMA)
-          self.index_entries_cleaned += 1
-        except dbconstants.AppScaleDBConnectionError:
-          logger.exception('Unable to delete index.')
-          self.index_entries_delete_failures += 1
-
-  def insert_scatter_indexes(self, entity_key, path, scatter_prop):
-    """ Writes scatter property references to the index tables.
-
-    Args:
-      entity_key: A string specifying the entity key.
-      path: A list of strings representing path elements.
-      scatter_prop: An entity_pb.Property object.
-    """
-    app_id, namespace, encoded_path = entity_key.split(
-      dbconstants.KEY_DELIMITER)
-    kind = path[-1].split(dbconstants.ID_SEPARATOR)[0]
-    asc_val = str(utils.encode_index_pb(scatter_prop.value()))
-    dsc_val = helper_functions.reverse_lex(asc_val)
-    prefix = dbconstants.KEY_DELIMITER.join([app_id, namespace])
-    prop_name = '__scatter__'
-    rows = [{'table': dbconstants.ASC_PROPERTY_TABLE, 'val': asc_val},
-            {'table': dbconstants.DSC_PROPERTY_TABLE, 'val': dsc_val}]
-
-    for row in rows:
-      index_key = utils.get_index_key_from_params(
-        [prefix, kind, prop_name, row['val'], encoded_path])
-      # There's no need to insert with a particular timestamp because
-      # datastore writes and deletes to this key should take precedence.
-      statement = """
-        INSERT INTO "{table}" ({key}, {column}, {value})
-        VALUES (%s, %s, %s)
-      """.format(table=row['table'],
-                 key=cassandra_interface.ThriftColumn.KEY,
-                 column=cassandra_interface.ThriftColumn.COLUMN_NAME,
-                 value=cassandra_interface.ThriftColumn.VALUE)
-      params = (bytearray(index_key), 'reference', bytearray(entity_key))
-      self.db_access.session.execute(statement, params)
-
-  def populate_scatter_prop(self):
-    """ Populates the scatter property for existing entities. """
-    task_id = self.POPULATE_SCATTER
-
-    # If we have state information beyond what function to use, load the last
-    # seen start key.
-    start_key = ''
-    if len(self.groomer_state) > 1 and self.groomer_state[0] == task_id:
-      start_key = self.groomer_state[1]
-
-    # Indicate that this job has started after the scatter property was added.
-    if not start_key:
-      index_state = self.db_access.get_metadata(
-        cassandra_interface.SCATTER_PROP_KEY)
-      if index_state is None:
-        self.db_access.set_metadata(
-          cassandra_interface.SCATTER_PROP_KEY,
-          cassandra_interface.ScatterPropStates.POPULATION_IN_PROGRESS)
-
-    while True:
-      statement = """
-        SELECT DISTINCT key FROM "{table}"
-        WHERE token(key) > %s
-        LIMIT {limit}
-      """.format(table=dbconstants.APP_ENTITY_TABLE, limit=self.BATCH_SIZE)
-      parameters = (bytearray(start_key),)
-      keys = self.db_access.session.execute(statement, parameters)
-
-      if not keys:
-        break
-
-      def create_path_element(encoded_element):
-        element = entity_pb.Path_Element()
-        # IDs are treated as names here. This avoids having to fetch the entity
-        # to tell the difference.
-        key_name = encoded_element.split(dbconstants.ID_SEPARATOR, 1)[-1]
-        element.set_name(key_name)
-        return element
-
-      key = None
-      for row in keys:
-        key = row.key
-        encoded_path = key.split(dbconstants.KEY_DELIMITER)[2]
-        path = [element for element
-                in encoded_path.split(dbconstants.KIND_SEPARATOR) if element]
-        element_list = [create_path_element(element) for element in path]
-        scatter_prop = utils.get_scatter_prop(element_list)
-
-        if scatter_prop is not None:
-          self.insert_scatter_indexes(key, path, scatter_prop)
-          self.scatter_prop_vals_populated += 1
-
-      start_key = key
-
-      if time.time() > self.last_logged + self.LOG_PROGRESS_FREQUENCY:
-        logger.info('Populated {} scatter property index entries'
-          .format(self.scatter_prop_vals_populated))
-        self.last_logged = time.time()
-
-      self.update_groomer_state([task_id, start_key])
-
-    self.db_access.set_metadata(
-      cassandra_interface.SCATTER_PROP_KEY,
-      cassandra_interface.ScatterPropStates.POPULATED)
-
-  def clean_up_indexes(self, direction):
-    """ Deletes invalid single property index entries.
-
-    This is needed because we do not delete index entries when updating or
-    deleting entities. With time, this results in queries taking an increasing
-    amount of time.
-
-    Args:
-      direction: The direction of the index.
-    """
-    if direction == datastore_pb.Query_Order.ASCENDING:
-      table_name = dbconstants.ASC_PROPERTY_TABLE
-      task_id = self.CLEAN_ASC_INDICES_TASK
-    else:
-      table_name = dbconstants.DSC_PROPERTY_TABLE
-      task_id = self.CLEAN_DSC_INDICES_TASK
-
-    # If we have state information beyond what function to use,
-    # load the last seen start key.
-    if len(self.groomer_state) > 1 and self.groomer_state[0] == task_id:
-      start_key = self.groomer_state[1]
-    else:
-      start_key = ''
-    end_key = dbconstants.TERMINATING_STRING
-
-    # Indicate that an index scrub has started.
-    if direction == datastore_pb.Query_Order.ASCENDING and not start_key:
-      self.db_access.set_metadata_sync(
-        cassandra_interface.INDEX_STATE_KEY,
-        cassandra_interface.IndexStates.SCRUB_IN_PROGRESS)
-
-    while True:
-      references = self.db_access.range_query_sync(
-        table_name=table_name,
-        column_names=dbconstants.PROPERTY_SCHEMA,
-        start_key=start_key,
-        end_key=end_key,
-        limit=self.BATCH_SIZE,
-        start_inclusive=False,
-      )
-      if len(references) == 0:
-        break
-
-      self.index_entries_checked += len(references)
-      if time.time() > self.last_logged + self.LOG_PROGRESS_FREQUENCY:
-        logger.info('Checked {} index entries'
-          .format(self.index_entries_checked))
-        self.last_logged = time.time()
-      first_ref = references[0].keys()[0]
-      logger.debug('Fetched {} total refs, starting with {}, direction: {}'
-        .format(self.index_entries_checked, [first_ref], direction))
-
-      last_start_key = start_key
-      start_key = references[-1].keys()[0]
-      if start_key == last_start_key:
-        raise dbconstants.AppScaleDBError(
-          'An infinite loop was detected while fetching references.')
-
-      entities = self.fetch_entity_dict_for_references(references)
-
-      # Group invalid references by entity key so we can minimize locks.
-      invalid_refs = {}
-      for reference in references:
-        prop_name = reference.keys()[0].split(self.ds_access._SEPARATOR)[3]
-        if not self.ds_access._DatastoreDistributed__valid_index_entry(
-          reference, entities, direction, prop_name):
-          entity_key = reference.values()[0][self.ds_access.INDEX_REFERENCE_COLUMN]
-          if entity_key not in invalid_refs:
-            invalid_refs[entity_key] = []
-          invalid_refs[entity_key].append(reference)
-
-      for entity_key in invalid_refs:
-        self.lock_and_delete_indexes(invalid_refs[entity_key], direction, entity_key)
-      self.update_groomer_state([task_id, start_key])
-
-  def clean_up_kind_indices(self):
-    """ Deletes invalid kind index entries.
-
-    This is needed because the datastore does not delete kind index entries
-    when deleting entities.
-    """
-    table_name = dbconstants.APP_KIND_TABLE
-    task_id = self.CLEAN_KIND_INDICES_TASK
-
-    start_key = ''
-    end_key = dbconstants.TERMINATING_STRING
-    if len(self.groomer_state) > 1:
-      start_key = self.groomer_state[1]
-
-    while True:
-      references = self.db_access.range_query_sync(
-        table_name=table_name,
-        column_names=dbconstants.APP_KIND_SCHEMA,
-        start_key=start_key,
-        end_key=end_key,
-        limit=self.BATCH_SIZE,
-        start_inclusive=False,
-      )
-      if len(references) == 0:
-        break
-
-      self.index_entries_checked += len(references)
-      if time.time() > self.last_logged + self.LOG_PROGRESS_FREQUENCY:
-        logger.info('Checked {} index entries'.
-          format(self.index_entries_checked))
-        self.last_logged = time.time()
-      first_ref = references[0].keys()[0]
-      logger.debug('Fetched {} kind indices, starting with {}'.
-        format(len(references), [first_ref]))
-
-      last_start_key = start_key
-      start_key = references[-1].keys()[0]
-      if start_key == last_start_key:
-        raise dbconstants.AppScaleDBError(
-          'An infinite loop was detected while fetching references.')
-
-      entities = self.fetch_entity_dict_for_references(references)
-
-      for reference in references:
-        entity_key = reference.values()[0].values()[0]
-        if entity_key not in entities:
-          self.lock_and_delete_kind_index(reference)
-
-      self.update_groomer_state([task_id, start_key])
-
-    # Indicate that the index has been scrubbed after the journal was removed.
-    index_state = self.db_access.get_metadata_sync(
-      cassandra_interface.INDEX_STATE_KEY)
-    if index_state == cassandra_interface.IndexStates.SCRUB_IN_PROGRESS:
-      self.db_access.set_metadata_sync(cassandra_interface.INDEX_STATE_KEY,
-                                       cassandra_interface.IndexStates.CLEAN)
-
-  def clean_up_composite_indexes(self):
-    """ Deletes old composite indexes and bad references.
-
-    Returns:
-      True on success, False otherwise.
-    """
-    return True
-
-  def get_composite_indexes(self, app_id, kind):
-    """ Fetches the composite indexes for a kind.
-
-    Args:
-      app_id: The application ID.
-      kind: A string, the kind for which we need composite indexes.
-    Returns:
-      A list of composite indexes.
-    """
-    if not kind:
-      return []
-
-    try:
-      project_index_manager = self.ds_access.index_manager.projects[app_id]
-    except KeyError:
-      return []
-
-    return [index for index in project_index_manager.indexes_pb
-            if index.definition().entity_type() == kind]
-
-  def delete_indexes(self, entity):
-    """ Deletes indexes for a given entity.
-
-    Args:
-      entity: An EntityProto.
-    """
-    return
-
-  def delete_composite_indexes(self, entity, composites):
-    """ Deletes composite indexes for an entity.
-
-    Args:
-      entity: An EntityProto.
-      composites: A list of datastore_pb.CompositeIndexes composite indexes.
-    """
-    row_keys = get_composite_indexes_rows([entity], composites)
-    self.db_access.batch_delete_sync(
-      dbconstants.COMPOSITE_TABLE, row_keys,
-      column_names=dbconstants.COMPOSITE_SCHEMA)
 
   def initialize_kind(self, app_id, kind):
     """ Puts a kind into the statistics object if
@@ -718,36 +281,23 @@ class DatastoreGroomer(threading.Thread):
     self.stats[app_id][kind]['number'] += 1
     return True
 
-  def txn_blacklist_cleanup(self):
-    """ Clean up old transactions and removed unused references
-        to reap storage.
-
-    Returns:
-      True on success, False otherwise.
-    """
-    #TODO implement
-    return True
-
   def process_entity(self, entity):
-    """ Processes an entity by updating statistics, indexes, and removes
-        tombstones.
+    """ Processes an entity by updating statistics.
 
     Args:
       entity: The entity to operate on.
     Returns:
       True on success, False otherwise.
     """
-    logger.debug("Process entity {0}".format(str(entity)))
-    key = entity.keys()[0]
-    one_entity = entity[key][dbconstants.APP_ENTITY_SCHEMA[0]]
+    one_entity = entity
 
     logger.debug("Entity value: {0}".format(entity))
 
     ent_proto = entity_pb.EntityProto()
     ent_proto.ParseFromString(one_entity)
+    key = ent_proto.key()
     self.process_statistics(key, ent_proto, len(one_entity))
-
-    return True
+    return base64.urlsafe_b64encode(key.Encode())
 
   def create_namespace_entry(self, namespace, size, number, timestamp):
     """ Puts a namespace into the datastore.
@@ -807,48 +357,6 @@ class DatastoreGroomer(threading.Thread):
     db.put(global_stat)
     logger.debug("Done creating global stat")
 
-  def remove_old_tasks_entities(self):
-    """ Queries for old tasks and removes the entity which tells
-    use whether a named task was enqueued.
-
-    Returns:
-      True on success.
-    """
-    # If we have state information beyond what function to use,
-    # load the last seen cursor.
-    if (len(self.groomer_state) > 1 and
-      self.groomer_state[0] == self.CLEAN_TASKS_TASK):
-      last_cursor = Cursor(self.groomer_state[1])
-    else:
-      last_cursor = None
-    self.register_db_accessor(constants.DASHBOARD_APP_ID)
-    timeout = datetime.datetime.utcnow() - \
-      datetime.timedelta(seconds=self.TASK_NAME_TIMEOUT)
-
-    counter = 0
-    logger.debug("The current time is {0}".format(datetime.datetime.utcnow()))
-    logger.debug("The timeout time is {0}".format(timeout))
-    while True:
-      query = TaskName.all()
-      if last_cursor:
-        query.with_cursor(last_cursor)
-      query.filter("timestamp <", timeout)
-      entities = query.fetch(self.BATCH_SIZE)
-      if len(entities) == 0:
-        break
-      last_cursor = query.cursor()
-      for entity in entities:
-        logger.debug("Removing task name {0}".format(entity.timestamp))
-        entity.delete()
-        counter += 1
-      if time.time() > self.last_logged + self.LOG_PROGRESS_FREQUENCY:
-        logger.info('Removed {} task entities.'.format(counter))
-        self.last_logged = self.LOG_PROGRESS_FREQUENCY
-      self.update_groomer_state([self.CLEAN_TASKS_TASK, last_cursor])
-
-    logger.info("Removed {0} task name entities".format(counter))
-    return True
-
   def clean_up_entities(self):
     # If we have state information beyond what function to use,
     # load the last seen key.
@@ -866,9 +374,8 @@ class DatastoreGroomer(threading.Thread):
           break
 
         for entity in entities:
-          self.process_entity(entity)
+          last_key = self.process_entity(entity)
 
-        last_key = entities[-1].keys()[0]
         self.entities_checked += len(entities)
         if time.time() > self.last_logged + self.LOG_PROGRESS_FREQUENCY:
           logger.info('Checked {} entities'.format(self.entities_checked))
@@ -899,53 +406,6 @@ class DatastoreGroomer(threading.Thread):
     os.environ['APPNAME'] = app_id
     os.environ['AUTH_DOMAIN'] = "appscale.com"
     return ds_distributed
-
-  def remove_old_logs(self, log_timeout):
-    """ Removes old logs.
-
-    Args:
-      log_timeout: The timeout value in seconds.
-
-    Returns:
-      True on success, False otherwise.
-    """
-    # If we have state information beyond what function to use,
-    # load the last seen cursor.
-    if (len(self.groomer_state) > 1 and
-      self.groomer_state[0] == self.CLEAN_LOGS_TASK):
-      last_cursor = Cursor(self.groomer_state[1])
-    else:
-      last_cursor = None
-
-    self.register_db_accessor(constants.DASHBOARD_APP_ID)
-    if log_timeout:
-      timeout = (datetime.datetime.utcnow() -
-        datetime.timedelta(seconds=log_timeout))
-      query = RequestLogLine.query(RequestLogLine.timestamp < timeout)
-      logger.debug("The timeout time is {0}".format(timeout))
-    else:
-      query = RequestLogLine.query()
-    counter = 0
-    logger.debug("The current time is {0}".format(datetime.datetime.utcnow()))
-
-    while True:
-      entities, next_cursor, more = query.fetch_page(self.BATCH_SIZE,
-        start_cursor=last_cursor)
-      for entity in entities:
-        logger.debug("Removing {0}".format(entity))
-        entity.key.delete()
-        counter += 1
-      if time.time() > self.last_logged + self.LOG_PROGRESS_FREQUENCY:
-        logger.info('Removed {} log entries.'.format(counter))
-        self.last_logged = time.time()
-      if more:
-        last_cursor = next_cursor
-        self.update_groomer_state([self.CLEAN_LOGS_TASK,
-          last_cursor.urlsafe()])
-      else:
-        break
-    logger.info("Removed {0} log entries.".format(counter))
-    return True
 
   def remove_old_statistics(self):
     """ Does a range query on the current batch of statistics and
@@ -1048,50 +508,18 @@ class DatastoreGroomer(threading.Thread):
       logger.exception(zkie)
     self.groomer_state = state
 
-  def run_groomer(self):
+  def run_groomer(self, ds_access):
     """ Runs the grooming process. Loops on the entire dataset sequentially
         and updates stats, indexes, and transactions.
     """
-    self.db_access = appscale_datastore_batch.DatastoreFactory.getDatastore(
-      self.table_name)
-    transaction_manager = TransactionManager(self.zoo_keeper.handle)
-    self.ds_access = DatastoreDistributed(
-      self.db_access, transaction_manager, zookeeper=self.zoo_keeper)
+    self.ds_access = ds_access
     index_manager = IndexManager(self.zoo_keeper.handle, self.ds_access)
-    self.ds_access.index_manager = index_manager
+    self.ds_access.index_manager.composite_index_manager = index_manager
 
     logger.info("Groomer started")
     start = time.time()
 
     self.reset_statistics()
-
-    clean_indexes = [
-      {
-        'id': self.CLEAN_ASC_INDICES_TASK,
-        'description': 'clean up ascending indices',
-        'function': self.clean_up_indexes,
-        'args': [datastore_pb.Query_Order.ASCENDING]
-      },
-      {
-        'id': self.CLEAN_DSC_INDICES_TASK,
-        'description': 'clean up descending indices',
-        'function': self.clean_up_indexes,
-        'args': [datastore_pb.Query_Order.DESCENDING]
-      },
-      {
-        'id': self.CLEAN_KIND_INDICES_TASK,
-        'description': 'clean up kind indices',
-        'function': self.clean_up_kind_indices,
-        'args': []
-      }
-    ]
-
-    populate_scatter_prop = [
-      {'id': self.POPULATE_SCATTER,
-       'description': 'populate indexes with scatter property',
-       'function': self.populate_scatter_prop,
-       'args': []}
-    ]
 
     tasks = [
       {
@@ -1099,31 +527,8 @@ class DatastoreGroomer(threading.Thread):
         'description': 'clean up entities',
         'function': self.clean_up_entities,
         'args': []
-      },
-      {
-        'id': self.CLEAN_LOGS_TASK,
-        'description': 'clean up old logs',
-        'function': self.remove_old_logs,
-        'args': [self.LOG_STORAGE_TIMEOUT]
-      },
-      {
-        'id': self.CLEAN_TASKS_TASK,
-        'description': 'clean up old tasks',
-        'function': self.remove_old_tasks_entities,
-        'args': []
       }
     ]
-
-    index_state = self.db_access.get_metadata_sync(
-      cassandra_interface.INDEX_STATE_KEY)
-    if index_state != cassandra_interface.IndexStates.CLEAN:
-      tasks.extend(clean_indexes)
-
-    scatter_prop_state = self.db_access.get_metadata(
-      cassandra_interface.SCATTER_PROP_KEY)
-    if scatter_prop_state != cassandra_interface.ScatterPropStates.POPULATED:
-      tasks.extend(populate_scatter_prop)
-
     groomer_state = self.zoo_keeper.get_node(self.GROOMER_STATE_PATH)
     logger.info('groomer_state: {}'.format(groomer_state))
     if groomer_state:
@@ -1153,52 +558,56 @@ class DatastoreGroomer(threading.Thread):
     self.update_statistics(timestamp)
     self.update_namespaces(timestamp)
 
-    del self.db_access
     del self.ds_access
 
     time_taken = time.time() - start
-    logger.info("Groomer cleaned {0} journal entries".format(
-      self.journal_entries_cleaned))
-    logger.info("Groomer checked {0} index entries".format(
-      self.index_entries_checked))
-    logger.info("Groomer cleaned {0} index entries".format(
-      self.index_entries_cleaned))
-    logger.info('Groomer populated {} scatter property index entries'.format(
-      self.scatter_prop_vals_populated))
-    if self.index_entries_delete_failures > 0:
-      logger.info("Groomer failed to remove {0} index entries".format(
-        self.index_entries_delete_failures))
     logger.info("Groomer took {0} seconds".format(str(time_taken)))
 
 
 def main():
   """ This main function allows you to run the groomer manually. """
+  logging.getLogger('appscale').setLevel(logging.INFO)
+
   zk_connection_locations = appscale_info.get_zk_locations_string()
   zookeeper = zk.ZKTransaction(host=zk_connection_locations)
-  db_info = appscale_info.get_db_info()
-  table = db_info[':table']
 
   datastore_path = ':'.join([appscale_info.get_db_proxy(),
                              str(constants.DB_SERVER_PORT)])
-  ds_groomer = DatastoreGroomer(zookeeper, table, datastore_path)
+  ds_groomer = DatastoreGroomer(zookeeper, 'fdb', datastore_path)
 
-  logger.debug("Trying to get groomer lock.")
-  if ds_groomer.get_groomer_lock():
-    logger.info("Got the groomer lock.")
+  ds_access = FDBDatastore()
+  ds_access.start()
+
+  io_loop = IOLoop.current()
+
+  def groom():
+    logger.debug("Trying to get groomer lock.")
     try:
-      ds_groomer.run_groomer()
-    except Exception as exception:
-      logger.exception('Encountered exception {} while running the groomer.'
-        .format(str(exception)))
-    try:
-      ds_groomer.zoo_keeper.release_lock_with_path(zk.DS_GROOM_LOCK_PATH)
-    except zk.ZKTransactionException, zk_exception:
-      logger.error("Unable to release zk lock {0}.".\
-        format(str(zk_exception)))
-    except zk.ZKInternalException, zk_exception:
-      logger.error("Unable to release zk lock {0}.".\
-        format(str(zk_exception)))
+      if ds_groomer.get_groomer_lock():
+        logger.info("Got the groomer lock.")
+        try:
+          ds_groomer.run_groomer(ds_access)
+        except Exception as exception:
+          logger.exception('Encountered exception {} while running the groomer.'
+            .format(str(exception)))
+        try:
+          ds_groomer.zoo_keeper.release_lock_with_path(zk.DS_GROOM_LOCK_PATH)
+        except zk.ZKTransactionException, zk_exception:
+          logger.error("Unable to release zk lock {0}.".\
+            format(str(zk_exception)))
+        except zk.ZKInternalException, zk_exception:
+          logger.error("Unable to release zk lock {0}.".\
+            format(str(zk_exception)))
+        finally:
+          zookeeper.close()
+      else:
+        logger.info("Did not get the groomer lock.")
     finally:
-      zookeeper.close()
-  else:
-    logger.info("Did not get the groomer lock.")
+      logger.info("Stopping IO loop")
+      io_loop.stop()
+
+  thread = threading.Thread(target=groom, args=())
+  thread.start()
+
+  logger.info("Starting IO loop")
+  io_loop.start()

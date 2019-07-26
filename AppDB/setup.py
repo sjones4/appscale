@@ -16,6 +16,7 @@ setup(
     'M2Crypto',
     'monotonic',
     'mmh3',
+    'pymemcache',
     'SOAPpy',
     'tornado'
   ],
