@@ -4549,7 +4549,8 @@ class Djinn
   # Deploy the dashboard by making a request to the AdminServer.
   def deploy_dashboard(source_archive)
     # Allow fewer dashboard instances for small deployments.
-    min_dashboards = [3, get_all_compute_nodes.length].min
+    min_dashboards = [AppDashboard::MIN_DASHBOARDS,
+                      get_all_compute_nodes.length].min
 
     archive_md5 = Digest::MD5.file(source_archive).hexdigest
 

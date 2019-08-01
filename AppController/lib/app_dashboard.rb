@@ -16,6 +16,8 @@ module AppDashboard
 
   APPSCALE_HOME = ENV['APPSCALE_HOME']
 
+  MIN_DASHBOARDS = Integer(ENV['APPSCALE_DASHBOARD_MIN'] || '3')
+
   # The Google App Engine appid for the Dashboard app.
   APP_NAME = 'appscaledashboard'.freeze
 
