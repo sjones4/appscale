@@ -2777,7 +2777,7 @@ class Djinn
     # list of nodes in the firewall.
     write_locations
     if FIREWALL_IS_ON
-      Djinn.log_run("bash #{APPSCALE_HOME}/firewall.conf")
+      Djinn.log_run("bash #{APPSCALE_HOME}/scripts/firewall-update.sh #{APPSCALE_HOME}/firewall.conf")
     end
   end
 
