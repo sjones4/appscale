@@ -86,6 +86,8 @@ server {
       client_max_body_size  2G;
     }
     <% end %>
+    include appscale-inc-server-https[.]conf;
+
     location = /reserved-channel-appscale-path {
       proxy_buffering    off;
       tcp_nodelay        on;

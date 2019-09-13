@@ -26,6 +26,7 @@
 
 import cgi
 import httplib
+import os
 import re
 import urllib
 import urlparse
@@ -33,6 +34,7 @@ import xml.etree.ElementTree as ET
 
 from google.appengine.api import apiproxy_stub_map
 from google.appengine.api import urlfetch_stub
+from google.appengine.ext.cloudstorage import appscale_cloud_storage
 from google.appengine.ext.cloudstorage import cloudstorage_stub
 from google.appengine.ext.cloudstorage import common
 
@@ -69,9 +71,16 @@ def _urlmatcher_for_gcs_stub(url):
   return host == common.LOCAL_API_HOST
 
 
+def _urlmatcher_for_local_gcs_stub(url):
+    """Determines whether a url should be handled by gcs stub for local
+       endpoint."""
+    _, host, _, _, _ = urlparse.urlsplit(url)
+    return host == 'storage.googleapis.com' and os.getenv('GCS_HOST')
+
 
 URLMATCHERS_TO_FETCH_FUNCTIONS = [
-    (_urlmatcher_for_gcs_stub, _urlfetch_to_gcs_stub)]
+    (_urlmatcher_for_gcs_stub, _urlfetch_to_gcs_stub),
+    (_urlmatcher_for_local_gcs_stub, _urlfetch_to_gcs_stub)]
 
 
 class _FakeUrlFetchResult(object):
@@ -100,7 +109,13 @@ def dispatch(method, headers, url, payload):
     ValueError: invalid request method.
   """
   method, headers, filename, param_dict = _preprocess(method, headers, url)
-  gcs_stub = cloudstorage_stub.CloudStorageStub(
+
+  # AppScale: Use an AppScale Cloud Storage client when GCS_HOST is set.
+  if os.getenv('GCS_HOST'):
+    gcs_stub = appscale_cloud_storage.AppScaleCloudStorageStub(
+      os.getenv('GCS_HOST'))
+  else:
+    gcs_stub = cloudstorage_stub.CloudStorageStub(
       apiproxy_stub_map.apiproxy.GetStub('blobstore').storage)
 
   if method == 'POST':

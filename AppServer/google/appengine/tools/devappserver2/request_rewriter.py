@@ -38,6 +38,7 @@ import logging
 import time
 import wsgiref.headers
 
+from google.appengine.ext.cloudstorage import cloudstorage_s3_blob_download
 from google.appengine.tools.devappserver2 import blob_download
 from google.appengine.tools.devappserver2 import constants
 
@@ -260,6 +261,7 @@ def _content_length_rewriter(state):
 # A list of functions that take a RewriterState and possibly modify it. The
 # functions are applied to the response in order.
 _FRONTEND_RESPONSE_REWRITER_CHAIN = [
+    cloudstorage_s3_blob_download.cloudstorage_s3_blobstore_download_rewriter,
     blob_download.blobstore_download_rewriter,
     functools.partial(_ignore_response_headers_rewriter,
                       constants.FRONTEND_IGNORED_RESPONSE_HEADERS),

@@ -187,7 +187,8 @@ class InstanceManager(object):
         pidfile,
         version.revision_key,
         api_server_port)
-      env_vars.update(create_python_app_env(self._login_server,
+      env_vars.update(create_python_app_env(self._deployment_config,
+                                            self._login_server,
                                             version.project_id))
     elif runtime in (JAVA, JAVA8):
       # Account for MaxPermSize (~170MB), the parent process (~50MB), and thread

@@ -3019,6 +3019,19 @@ class Djinn
                     false)
     Djinn.log_info('Set custom cassandra configuration.')
 
+    begin
+      contents = File.read("#{APPSCALE_CONFIG_DIR}/gcs")
+      gcs_config = JSON.parse(contents)
+      ZKInterface.ensure_path('/appscale/config')
+      ZKInterface.set('/appscale/config/gcs', JSON.dump(gcs_config),
+                      false)
+      Djinn.log_info('Set gcs configuration.')
+    rescue Errno::ENOENT
+      Djinn.log_debug('No gcs configuration found.')
+    rescue JSON::ParserError
+      Djinn.log_error('Invalid JSON in gcs configuration.')
+    end
+
     if @options.key?('default_max_appserver_memory')
       ZKInterface.set_runtime_params(
         {:default_max_appserver_memory => Integer(@options['default_max_appserver_memory'])})

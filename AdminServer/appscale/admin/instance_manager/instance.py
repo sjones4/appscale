@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 class Instance(object):
   """ Represents an AppServer instance. """
   __slots__ = ['revision_key', 'port']
+
   def __init__(self, revision_key, port):
     self.revision_key = revision_key
     self.port = port
@@ -49,6 +50,23 @@ class Instance(object):
     return hash((self.revision_key, self.port))
 
 
+def put_gcs_app_env(env_vars, deployment_config):
+    """ Put any gcs environment variables in the given environment
+
+    Args:
+      env_vars: Environment dictionary to update
+      deployment_config: A DeploymentConfig object.
+    """
+    gcs_config = {'scheme': 'https', 'port': 443}
+    try:
+        gcs_config.update(deployment_config.get_config('gcs'))
+    except ConfigInaccessible:
+        logger.warning('Unable to fetch GCS configuration.')
+
+    if 'host' in gcs_config:
+        env_vars['GCS_HOST'] = '{scheme}://{host}:{port}'.format(**gcs_config)
+
+
 def create_java_app_env(deployment_config, runtime, project_id):
   """ Returns the environment variables Java application servers uses.
 
@@ -67,14 +85,7 @@ def create_java_app_env(deployment_config, runtime, project_id):
   else:
     env_vars = {'APPSCALE_HOME': APPSCALE_HOME}
 
-  gcs_config = {'scheme': 'https', 'port': 443}
-  try:
-    gcs_config.update(deployment_config.get_config('gcs'))
-  except ConfigInaccessible:
-    logger.warning('Unable to fetch GCS configuration.')
-
-  if 'host' in gcs_config:
-    env_vars['GCS_HOST'] = '{scheme}://{host}:{port}'.format(**gcs_config)
+  put_gcs_app_env(env_vars, deployment_config)
 
   return env_vars
 
@@ -113,7 +124,7 @@ def create_java_start_cmd(app_name, port, load_balancer_port, load_balancer_host
   cmd = [
     java_start_script,
     "--port=" + str(port),
-    #this jvm flag allows javax.email to connect to the smtp server
+    # this jvm flag allows javax.email to connect to the smtp server
     "--jvm_flag=-Dsocket.permit_connect=true",
     '--jvm_flag=-Xmx{}m'.format(max_heap),
     '--jvm_flag=-Djava.security.egd=file:/dev/./urandom',
@@ -200,10 +211,11 @@ def create_python_api_start_cmd(app_name, login_ip, port, pidfile,
   return ' '.join(cmd)
 
 
-def create_python_app_env(public_ip, app_name):
+def create_python_app_env(deployment_config, public_ip, app_name):
   """ Returns the environment variables the python application server uses.
 
   Args:
+    deployment_config: A DeploymentConfig object.
     public_ip: The public IP of the load balancer
     app_name: The name of the application to be run
   Returns:
@@ -215,6 +227,7 @@ def create_python_app_env(public_ip, app_name):
   env_vars['GOMAXPROCS'] = appscale_info.get_num_cpus()
   env_vars['APPSCALE_HOME'] = APPSCALE_HOME
   env_vars['PYTHON_LIB'] = "{0}/AppServer/".format(APPSCALE_HOME)
+  put_gcs_app_env(env_vars, deployment_config)
   return env_vars
 
 

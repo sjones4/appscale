@@ -65,7 +65,7 @@ from google.appengine.datastore import entity_pb
 
 
 
-_MAX_STRING_LENGTH = 500
+_MAX_STRING_LENGTH = 1500
 
 
 

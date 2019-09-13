@@ -203,14 +203,15 @@ def update_project_state(zk_client, project_id, new_state):
   """ Method for updating a project and its state in zookeeper."""
   project_path = constants.PROJECT_NODE_TEMPLATE.format(project_id)
   state_json, _ = zk_client.get(project_path)
+  state = None
   if state_json:
-    state = json.loads(state_json)
-  else:
-    state = {
-      'projectId': project_id,
-      'lifecycleState': new_state
-    }
-  state.update({'lifecycleState': LifecycleState.DELETE_REQUESTED})
+    try:
+      state = json.loads(state_json)
+      state['lifecycleState'] = new_state
+    except ValueError:
+      pass
+  if not state:
+    state = {'projectId': project_id, 'lifecycleState': new_state}
   zk_client.set(project_path, json.dumps(state))
 
 
@@ -730,9 +731,7 @@ class VersionsHandler(BaseHandler):
       self.zk_client.create(project_path, json.dumps(new_project),
                             makepath=True)
     except NodeExistsError:
-      if self.zk_client.get(project_path):
-        pass
-      self.zk_client.set(project_path, json.dumps(new_project))
+      update_project_state(self.zk_client, project_id, LifecycleState.ACTIVE)
 
     try:
       self.zk_client.create(version_node, json.dumps(new_version),
