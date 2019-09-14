@@ -1273,7 +1273,7 @@ class OAuthHandler(BaseHandler):
 
   def post(self):
     """Grants Access Tokens."""
-    if self.get_argument('scope', None) != self.AUTH_SCOPE:
+    if self.get_argument('scope', None) is None:
       raise CustomHTTPError(HTTPCodes.BAD_REQUEST, message='Invalid scope')
 
     grant_type = self.get_argument('grant_type', None)
