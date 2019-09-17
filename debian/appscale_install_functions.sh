@@ -720,9 +720,13 @@ installsearch2()
     cachepackage ${ANTLR_JAR} ${ANTLR_JAR_MD5}
     cp "${PACKAGE_CACHE}/${ANTLR_JAR}" "/usr/local/lib/${ANTLR_JAR}"
 
+    # Create virtual environment based on Python 3
+    rm -rf /opt/appscale_venvs/search2
+    python3 -m venv /opt/appscale_venvs/search2/
+
     # Let the script compile protocols and parser and install package using pip.
     "${APPSCALE_HOME}/SearchService2/build-scripts/ensure_searchservice2.sh" \
-        pip3
+        /opt/appscale_venvs/search2/bin/pip
 }
 
 prepdashboard()
