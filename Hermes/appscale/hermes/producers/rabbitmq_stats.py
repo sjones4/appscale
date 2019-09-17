@@ -115,8 +115,8 @@ class PushQueueStatsSource(object):
     start = time.time()
 
     url = 'http://localhost:{}{}'.format(API_PORT, QUEUES_API)
-    creds = base64.b64encode(':'.join([USER, PASS]))
-    headers = {'Authorization': 'Basic {}'.format(creds)}
+    creds = base64.b64encode(b':'.join([USER, PASS]))
+    headers = {'Authorization': 'Basic {}'.format(creds.decode)}
 
     try:
       async with aiohttp.ClientSession() as session:
