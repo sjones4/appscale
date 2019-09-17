@@ -631,34 +631,27 @@ installcommon()
 {
     pip install --upgrade --no-deps ${APPSCALE_HOME}/common
     pip install ${APPSCALE_HOME}/common
+
+    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/common
+    pip3 install ${APPSCALE_HOME}/common
 }
 
 installadminserver()
 {
-    pip install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
-    pip install ${APPSCALE_HOME}/AdminServer
+    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
+    pip3 install ${APPSCALE_HOME}/AdminServer
 }
 
 installhermes()
 {
-    # Create virtual environment based on Python 3
-    mkdir -p /opt/appscale_venvs
-    rm -rf /opt/appscale_venvs/hermes
-    python3 -m venv /opt/appscale_venvs/hermes/
-    # Install Hermes and its dependencies in it
-    HERMES_PIP=/opt/appscale_venvs/hermes/bin/pip
-    ${HERMES_PIP} install --upgrade --no-deps ${APPSCALE_HOME}/common
-    ${HERMES_PIP} install ${APPSCALE_HOME}/common
-    ${HERMES_PIP} install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
-    ${HERMES_PIP} install ${APPSCALE_HOME}/AdminServer
-    ${HERMES_PIP} install --upgrade --no-deps ${APPSCALE_HOME}/Hermes
-    ${HERMES_PIP} install ${APPSCALE_HOME}/Hermes
+    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/Hermes
+    pip3 install ${APPSCALE_HOME}/Hermes
 }
 
 installinfrastructuremanager()
 {
-    pip install --upgrade --no-deps ${APPSCALE_HOME}/InfrastructureManager
-    pip install ${APPSCALE_HOME}/InfrastructureManager
+    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/InfrastructureManager
+    pip3 install ${APPSCALE_HOME}/InfrastructureManager
 }
 
 installtaskqueue()
@@ -722,13 +715,9 @@ installsearch2()
     cachepackage ${ANTLR_JAR} ${ANTLR_JAR_MD5}
     cp "${PACKAGE_CACHE}/${ANTLR_JAR}" "/usr/local/lib/${ANTLR_JAR}"
 
-    # Create virtual environment based on Python 3
-    rm -rf /opt/appscale_venvs/search2
-    python3 -m venv /opt/appscale_venvs/search2/
-
     # Let the script compile protocols and parser and install package using pip.
     "${APPSCALE_HOME}/SearchService2/build-scripts/ensure_searchservice2.sh" \
-        /opt/appscale_venvs/search2/bin/pip
+        pip3
 }
 
 prepdashboard()
