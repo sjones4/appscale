@@ -3868,6 +3868,7 @@ class Djinn
     # Update Python packages across corresponding virtual environments
     if update_dirs.include?('common')
       update_python_package("#{APPSCALE_HOME}/common")
+      update_python_package("#{APPSCALE_HOME}/common", "pip3")
       update_python_package("#{APPSCALE_HOME}/common",
                             '/opt/appscale_venvs/api_server/bin/pip')
       update_python_package("#{APPSCALE_HOME}/common",
@@ -3892,7 +3893,7 @@ class Djinn
       update_python_package("#{APPSCALE_HOME}/AppDB")
     end
     if update_dirs.include?('iaas_manager')
-      update_python_package("#{APPSCALE_HOME}/InfrastructureManager")
+      update_python_package("#{APPSCALE_HOME}/InfrastructureManager", "pip3")
     end
     if update_dirs.include?('hermes')
       update_python_package("#{APPSCALE_HOME}/Hermes",
