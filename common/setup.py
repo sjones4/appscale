@@ -2,12 +2,14 @@ from setuptools import setup
 import sys
 
 install_requires = [
-  'future==0.17.1',
   'kazoo==2.6.0',
   'monotonic',
   'PyYAML>=4.2b1'
   'mock==2.0.0'
 ]
+
+if sys.version_info < (3,):
+  install_requires.append('future==0.17.1')
 
 setup(
   name='appscale-common',
