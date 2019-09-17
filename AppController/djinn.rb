@@ -3569,7 +3569,7 @@ class Djinn
   def start_hermes
     @state = "Starting Hermes"
     Djinn.log_info("Starting Hermes service.")
-    start_cmd = "/opt/appscale_venvs/hermes/bin/appscale-hermes"
+    start_cmd = `which appscale-hermes`.chomp
     start_cmd << ' --verbose' if @options['verbose'].downcase == 'true'
     MonitInterface.start(:hermes, start_cmd)
     if my_node.is_shadow?
@@ -3839,10 +3839,9 @@ class Djinn
     # Update Python packages across corresponding virtual environments
     if update_dirs.include?('common')
       update_python_package("#{APPSCALE_HOME}/common")
+      update_python_package("#{APPSCALE_HOME}/common", "pip3")
       update_python_package("#{APPSCALE_HOME}/common",
                             '/opt/appscale_venvs/api_server/bin/pip')
-      update_python_package("#{APPSCALE_HOME}/common",
-                            '/opt/appscale_venvs/hermes/bin/pip')
       update_python_package("#{APPSCALE_HOME}/common",
                             TaskQueue::TASKQUEUE_PIP)
       update_python_package("#{APPSCALE_HOME}/common",
@@ -3852,9 +3851,9 @@ class Djinn
       update_python_package("#{APPSCALE_HOME}/AppControllerClient")
     end
     if update_dirs.include?('admin_server')
-      update_python_package("#{APPSCALE_HOME}/AdminServer")
       update_python_package("#{APPSCALE_HOME}/AdminServer",
-                            '/opt/appscale_venvs/hermes/bin/pip')
+                            'pip3')
+      update_python_package("#{APPSCALE_HOME}/AdminServer")
     end
     if update_dirs.include?('taskqueue')
       build_taskqueue
@@ -3863,11 +3862,11 @@ class Djinn
       update_python_package("#{APPSCALE_HOME}/AppDB")
     end
     if update_dirs.include?('iaas_manager')
-      update_python_package("#{APPSCALE_HOME}/InfrastructureManager")
+      update_python_package("#{APPSCALE_HOME}/InfrastructureManager", "pip3")
     end
     if update_dirs.include?('hermes')
       update_python_package("#{APPSCALE_HOME}/Hermes",
-                            '/opt/appscale_venvs/hermes/bin/pip')
+                            'pip3')
     end
     if update_dirs.include?('api_server')
       build_api_server
