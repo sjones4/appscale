@@ -266,7 +266,7 @@ class TestRetryWatchCoroutine(testing.AsyncTestCase):
 
     @gen.coroutine
     def func(call_arg):
-      for _ in xrange(20):
+      for _ in range(20):
         # Let tornado chance to switch to another coroutine.
         yield gen.sleep(0.001)
         shared_data.append(call_arg)
@@ -283,7 +283,7 @@ class TestRetryWatchCoroutine(testing.AsyncTestCase):
 
     @gen.coroutine
     def func(call_arg):
-      for _ in xrange(3):
+      for _ in range(3):
         yield gen.sleep(0.001)
         shared_data.append(call_arg)
       if call_arg != 4:
@@ -300,7 +300,7 @@ class TestRetryWatchCoroutine(testing.AsyncTestCase):
 
     @gen.coroutine
     def func(call_arg):
-      for _ in xrange(20):
+      for _ in range(20):
         yield gen.sleep(0.001)
         shared_data.append(call_arg)
 
