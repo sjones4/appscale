@@ -638,11 +638,13 @@ installcommon()
 
 installadminserver()
 {
+    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
+    pip3 install ${APPSCALE_HOME}/AdminServer
+
+    # overwrites python3 scripts
     pip install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
     pip install ${APPSCALE_HOME}/AdminServer
 
-    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
-    pip3 install ${APPSCALE_HOME}/AdminServer
 }
 
 installhermes()
