@@ -660,6 +660,10 @@ installhermes()
 
 installinfrastructuremanager()
 {
+    # install under python2 for tests
+    pip install --upgrade --no-deps ${APPSCALE_HOME}/InfrastructureManager
+    pip install ${APPSCALE_HOME}/InfrastructureManager
+
     pip3 install --upgrade --no-deps ${APPSCALE_HOME}/InfrastructureManager
     pip3 install ${APPSCALE_HOME}/InfrastructureManager
 }
