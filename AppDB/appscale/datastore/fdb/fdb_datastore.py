@@ -227,7 +227,7 @@ class FDBDatastore(object):
       tr, query, read_versionstamp)
     for prop_name in query.property_name_list():
       prop_name = decode_str(prop_name)
-      if prop_name not in iterator.prop_names:
+      if prop_name not in iterator.prop_names and prop_name != KEY_PROP:
         raise BadRequest(
           u'Projections on {} are not supported'.format(prop_name))
 
