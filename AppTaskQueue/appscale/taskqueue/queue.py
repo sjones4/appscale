@@ -281,9 +281,8 @@ class PostgresPullQueue(Queue):
     except AttributeError:
       lease_expires = 'current_timestamp'
 
-    pg_connection = pg_wrapper.get_connection()
     try:
-      with pg_connection:
+      with pg_wrapper.connection() as pg_connection:
         with pg_connection.cursor() as pg_cursor:
           pg_cursor.execute(
             'INSERT INTO "{table}" ( '
@@ -326,8 +325,7 @@ class PostgresPullQueue(Queue):
     else:
       columns = ['payload', 'task_name', 'time_enqueued',
                  'lease_expires', 'lease_count', 'tag']
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'SELECT {columns} FROM "{tasks_table}" '
@@ -352,8 +350,7 @@ class PostgresPullQueue(Queue):
     Args:
       task: A Task object.
     """
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'UPDATE "{tasks_table}" '
@@ -376,8 +373,7 @@ class PostgresPullQueue(Queue):
     Returns:
       A Task object.
     """
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'UPDATE "{tasks_table}" '
@@ -441,8 +437,7 @@ class PostgresPullQueue(Queue):
     else:
       old_eta_verification = ''
 
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           statement.format(tasks_table=self.tasks_table_name,
@@ -470,8 +465,7 @@ class PostgresPullQueue(Queue):
     """
     columns = ['task_name', 'time_enqueued',
                'lease_expires', 'lease_count', 'tag']
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'SELECT {columns} FROM "{tasks_table}" '
@@ -532,8 +526,7 @@ class PostgresPullQueue(Queue):
       '"{table}".{col}'.format(table=self.tasks_table_name, col=column)
       for column in columns
     ]
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'UPDATE "{tasks_table}" '
@@ -573,8 +566,7 @@ class PostgresPullQueue(Queue):
   def purge(self):
     """ Remove all tasks from queue.
     """
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'TRUNCATE TABLE "{tasks_table}"'
@@ -621,8 +613,7 @@ class PostgresPullQueue(Queue):
     Returns:
       An integer specifying the number of tasks in the queue.
     """
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'SELECT count(*) FROM "{tasks_table}" WHERE time_deleted IS NULL'
@@ -639,8 +630,7 @@ class PostgresPullQueue(Queue):
       A datetime object specifying the oldest ETA or None if there are no
       tasks.
     """
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'SELECT min(lease_expires) FROM "{tasks_table}" '
@@ -654,8 +644,7 @@ class PostgresPullQueue(Queue):
   def flush_deleted(self):
     """ Removes all tasks which were deleted more than week ago.
     """
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'DELETE FROM "{tasks_table}" '
@@ -707,8 +696,7 @@ class PostgresPullQueue(Queue):
     Returns:
       A string containing a tag or None.
     """
-    pg_connection = pg_wrapper.get_connection()
-    with pg_connection:
+    with pg_wrapper.connection() as pg_connection:
       with pg_connection.cursor() as pg_cursor:
         pg_cursor.execute(
           'SELECT tag FROM "{tasks_table}" '
@@ -761,9 +749,8 @@ class PostgresPullQueue(Queue):
 
 @retry_pg_connection
 def ensure_project_schema_created(project_id):
-  pg_connection = pg_wrapper.get_connection()
   schema_name = PostgresPullQueue.get_schema_name(project_id)
-  with pg_connection:
+  with pg_wrapper.connection() as pg_connection:
     with pg_connection.cursor() as pg_cursor:
       logger.info('Ensuring "{schema_name}" schema is created'
                   .format(schema_name=schema_name))
@@ -775,9 +762,8 @@ def ensure_project_schema_created(project_id):
 
 @retry_pg_connection
 def ensure_queues_table_created(project_id):
-  pg_connection = pg_wrapper.get_connection()
   queues_table_name = PostgresPullQueue.get_queues_table_name(project_id)
-  with pg_connection:
+  with pg_wrapper.connection() as pg_connection:
     with pg_connection.cursor() as pg_cursor:
       logger.info('Ensuring "{}" table is created'.format(queues_table_name))
       pg_cursor.execute(
@@ -791,9 +777,8 @@ def ensure_queues_table_created(project_id):
 
 @retry_pg_connection
 def ensure_queue_registered(project_id, queue_name):
-  pg_connection = pg_wrapper.get_connection()
   queues_table_name = PostgresPullQueue.get_queues_table_name(project_id)
-  with pg_connection:
+  with pg_wrapper.connection() as pg_connection:
     with pg_connection.cursor() as pg_cursor:
       pg_cursor.execute(
         'SELECT id FROM "{queues_table}" WHERE queue_name = %(queue_name)s;'
@@ -821,11 +806,10 @@ def ensure_queue_registered(project_id, queue_name):
 
 @retry_pg_connection
 def ensure_tasks_table_created(project_id, queue_id):
-  pg_connection = pg_wrapper.get_connection()
   tasks_table_name = PostgresPullQueue.get_tasks_table_name(
     project_id, queue_id
   )
-  with pg_connection:
+  with pg_wrapper.connection() as pg_connection:
     with pg_connection.cursor() as pg_cursor:
       logger.info('Ensuring "{}" table is created'.format(tasks_table_name))
       pg_cursor.execute(
