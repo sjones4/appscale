@@ -76,7 +76,7 @@ class PostgresConnectionContextManager(object):
     return self._connection.__enter__()
 
   def __exit__(self, exc_type, exc_value, traceback):
-    logger.info('Releasing connection to Postgres server')
+    logger.info('Releasing connection to Postgres server, error: {}'.format(str(exc_value)))
     try:
       return self._connection.__exit__(exc_type, exc_value, traceback)
     except psycopg2.Error as e:
