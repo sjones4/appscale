@@ -391,7 +391,7 @@ class PostgresPullQueue(Queue):
             'lease_seconds': new_lease_seconds
           }
         )
-        if pg_cursor.statusmessage != 'UPDATE 1':
+        if pg_cursor.rowcount != 1:
           logger.info('Expected to get status "UPDATE 1", got: "{}"'
                       .format(pg_cursor.statusmessage))
           raise InvalidLeaseRequest('The task lease has expired')
@@ -444,7 +444,7 @@ class PostgresPullQueue(Queue):
                            old_eta_verification=old_eta_verification),
           vars=parameters
         )
-        if pg_cursor.statusmessage != 'UPDATE 1':
+        if pg_cursor.rowcount != 1:
           logger.info('Expected to get status "UPDATE 1", got: "{}"'
                       .format(pg_cursor.statusmessage))
           raise InvalidLeaseRequest('The task lease has expired')
