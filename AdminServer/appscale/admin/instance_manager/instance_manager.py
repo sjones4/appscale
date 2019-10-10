@@ -1,10 +1,12 @@
 """ Fulfills AppServer instance assignments from the scheduler. """
-import httplib
 import logging
 import monotonic
 import json
 import os
-import urllib2
+import urllib.error
+import urllib.request
+
+from http import HTTPStatus
 
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -343,11 +345,11 @@ class InstanceManager(object):
     """
     url = "http://" + self._private_ip + ":" + str(port) + FETCH_PATH
     try:
-      opener = urllib2.build_opener(NoRedirection)
+      opener = urllib.request.build_opener(NoRedirection)
       response = opener.open(url, timeout=HEALTH_CHECK_TIMEOUT)
-      if response.code == httplib.SERVICE_UNAVAILABLE:
+      if response.code == HTTPStatus.SERVICE_UNAVAILABLE.value:
         return False
-    except IOError:
+    except urllib.error.HTTPError as e:
       return False
 
     return True

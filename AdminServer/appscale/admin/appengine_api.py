@@ -7,14 +7,8 @@ import json
 import logging
 import random
 
-try:
-  import urllib.request
-  urlopen = urllib.request.urlopen
-  from urllib.error import URLError
-except ImportError:
-  import urllib2
-  urlopen = urllib2.urlopen
-  from urllib2 import URLError
+from urllib.request import urlopen
+from urllib.error import URLError
 
 import six
 import yaml

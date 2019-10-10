@@ -5,7 +5,7 @@ import os
 import subprocess
 import time
 import unittest
-import urllib2
+import urllib.request
 
 from flexmock import flexmock
 from tornado import gen
@@ -284,7 +284,7 @@ class TestInstanceManager(AsyncTestCase):
     fake_opener = flexmock(
       open=lambda url, timeout: flexmock(code=200,
                                          headers=flexmock(headers=[])))
-    flexmock(urllib2).should_receive('build_opener').and_return(fake_opener)
+    flexmock(urllib.request).should_receive('build_opener').and_return(fake_opener)
     flexmock(appscale_info).should_receive('get_private_ip').and_return(ip)
 
     instance_manager = InstanceManager(

@@ -1,7 +1,7 @@
 """ Common constants for managing AppServer instances. """
 
 import os
-import urllib2
+import urllib.request
 
 from appscale.common.constants import APPSCALE_HOME
 
@@ -16,19 +16,9 @@ class BadConfigurationException(Exception):
     return repr(self.value)
 
 
-class NoRedirection(urllib2.HTTPErrorProcessor):
-  """ A url opener that does not automatically redirect. """
-  def http_response(self, request, response):
-    """ Processes HTTP responses.
-
-    Args:
-      request: An HTTP request object.
-      response: An HTTP response object.
-    Returns:
-      The HTTP response object.
-    """
-    return response
-  https_response = http_response
+class NoRedirection(urllib.request.HTTPRedirectHandler):
+  def redirect_request(self, req, fp, code, msg, headers, newurl):
+    return None
 
 
 # The location of the API server start script.
