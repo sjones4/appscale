@@ -3706,6 +3706,7 @@ class Djinn
     # Update Python packages across corresponding virtual environments
     if update_dirs.include?('common')
       update_python_package("#{APPSCALE_HOME}/common")
+      update_python_package("#{APPSCALE_HOME}/common", "pip3")
       update_python_package("#{APPSCALE_HOME}/common",
                             '/opt/appscale_venvs/api_server/bin/pip')
       update_python_package("#{APPSCALE_HOME}/common",
@@ -3719,7 +3720,7 @@ class Djinn
       update_python_package("#{APPSCALE_HOME}/AppControllerClient")
     end
     if update_dirs.include?('admin_server')
-      update_python_package("#{APPSCALE_HOME}/AdminServer")
+      update_python_package("#{APPSCALE_HOME}/AdminServer", "pip3")
       update_python_package("#{APPSCALE_HOME}/AdminServer",
                             '/opt/appscale_venvs/hermes/bin/pip')
     end

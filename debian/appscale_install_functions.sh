@@ -595,12 +595,15 @@ installcommon()
 {
     pip install --upgrade --no-deps ${APPSCALE_HOME}/common
     pip install ${APPSCALE_HOME}/common
+
+    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/common
+    pip3 install ${APPSCALE_HOME}/common
 }
 
 installadminserver()
 {
-    pip install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
-    pip install ${APPSCALE_HOME}/AdminServer
+    pip3 install --upgrade --no-deps ${APPSCALE_HOME}/AdminServer
+    pip3 install ${APPSCALE_HOME}/AdminServer
 }
 
 installhermes()

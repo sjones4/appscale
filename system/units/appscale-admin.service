@@ -6,7 +6,7 @@ Wants=appscale-haproxy@service.service appscale-haproxy@app.service
 
 [Service]
 Environment=APPSCALE_ADMIN_OPTION_PORT=17442
-ExecStart=/usr/bin/python2 ${APPSCALE_SERVICE_BIN}/appscale-admin serve -p ${APPSCALE_ADMIN_OPTION_PORT} $APPSCALE_OPTION_VERBOSE
+ExecStart=/usr/bin/python3 ${APPSCALE_SERVICE_BIN}/appscale-admin serve -p ${APPSCALE_ADMIN_OPTION_PORT} $APPSCALE_OPTION_VERBOSE
 ExecStop=/bin/sleep 5
 SyslogIdentifier=%p
 

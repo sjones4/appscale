@@ -6,19 +6,17 @@ install_requires = [
   'appscale-common',
   'jsonschema',
   'kazoo',
-  'idna>=2.5,<2.8',  # Required for requests.
+  'idna>=2.5,<2.9',  # Required for requests.
   'monotonic',
   'psutil',
   'PyYaml',
   'requests-unixsocket',
   'six',
-  'SOAPpy',
+  'SOAPpy-py3',
   'tabulate',
   'tornado',
   'mock',
 ]
-if sys.version_info < (3,):
-  install_requires.append('futures')
 
 setup(
   name='appscale-admin',
@@ -34,7 +32,6 @@ setup(
     'Development Status :: 3 - Alpha',
     'Intended Audience :: Developers',
     'License :: OSI Approved :: Apache Software License',
-    'Programming Language :: Python :: 2.7',
     'Programming Language :: Python :: 3'
   ],
   namespace_packages=['appscale'],
