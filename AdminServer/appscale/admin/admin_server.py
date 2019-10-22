@@ -855,9 +855,9 @@ class VersionsHandler(BaseHandler):
       yield self.thread_pool.submit(
         utils.extract_source, revision_key,
         version['deployment']['zip']['sourceUrl'], version['runtime'])
-    except IOError:
-      message = '{} does not exist'.format(
-        version['deployment']['zip']['sourceUrl'])
+    except IOError as error:
+      message = '{} does not exist ({})'.format(
+        version['deployment']['zip']['sourceUrl'], str(error.errno))
       raise CustomHTTPError(HTTPCodes.BAD_REQUEST, message=message)
     except constants.InvalidSource as error:
       raise CustomHTTPError(HTTPCodes.BAD_REQUEST,
