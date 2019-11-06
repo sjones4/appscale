@@ -14,9 +14,11 @@ import six
 from tornado import gen
 
 from appscale.common.unpackaged import APPSCALE_PYTHON_APPSERVER
+from appscale.datastore.fdb import codecs
 from appscale.datastore.fdb.codecs import (
   decode_str, decode_value, encode_value, encode_versionstamp_index, Path)
 from appscale.datastore.fdb.sdk import FindIndexToUse, ListCursor
+from appscale.datastore.fdb.stats.containers import IndexStatsSummary
 from appscale.datastore.fdb.utils import (
   format_prop_val, DS_ROOT, fdb, get_scatter_val, MAX_FDB_TX_DURATION,
   ResultIterator, SCATTER_PROP, VERSIONSTAMP_SIZE)
@@ -256,13 +258,20 @@ class CompositeEntry(IndexEntry):
     entity = entity_pb.EntityProto()
     entity.mutable_key().MergeFrom(self.key)
     entity.mutable_entity_group().MergeFrom(self.group)
-    for prop_name, value in self.properties:
+
+    def add_prop(prop_name, multiple, value):
       prop = entity.add_property()
       prop.set_name(prop_name)
       prop.set_meaning(entity_pb.Property.INDEX_VALUE)
-      # TODO: Check if this is sometimes True.
-      prop.set_multiple(False)
+      prop.set_multiple(multiple)
       prop.mutable_value().MergeFrom(value)
+
+    for prop_name, value in self.properties:
+      if isinstance(value, list):
+        for multiple_val in value:
+          add_prop(prop_name, True, multiple_val)
+      else:
+        add_prop(prop_name, False, value)
 
     return entity
 
@@ -336,8 +345,10 @@ class IndexIterator(object):
 
 
 class NamespaceIterator(object):
-  def __init__(self, tr, project_dir):
+  """ Iterates over a list of namespaces in a project. """
+  def __init__(self, tr, tornado_fdb, project_dir):
     self._tr = tr
+    self._tornado_fdb = tornado_fdb
     self._project_dir = project_dir
     self._done = False
 
@@ -350,6 +361,14 @@ class NamespaceIterator(object):
     ns_dir = self._project_dir.open(self._tr, (KindIndex.DIR_NAME,))
     namespaces = ns_dir.list(self._tr)
 
+    # Filter out namespaces that don't have at least one kind.
+    kinds_by_ns = yield [KindIterator(self._tr, self._tornado_fdb,
+                                      self._project_dir, namespace).next_page()
+                         for namespace in namespaces]
+    namespaces = [
+      namespace for namespace, (kinds, _) in zip(namespaces, kinds_by_ns)
+      if kinds]
+
     # The API uses an ID of 1 to label the default namespace.
     results = [IndexEntry(self._project_dir.get_path()[-1], u'',
                           (u'__namespace__', namespace or 1), None, None)
@@ -360,6 +379,7 @@ class NamespaceIterator(object):
 
 
 class KindIterator(object):
+  """ Iterates over a list of kinds in a namespace. """
   def __init__(self, tr, tornado_fdb, project_dir, namespace):
     self._tr = tr
     self._tornado_fdb = tornado_fdb
@@ -373,8 +393,13 @@ class KindIterator(object):
       raise gen.Return(([], False))
 
     # TODO: This can be made async.
-    ns_dir = self._project_dir.open(
-      self._tr, (KindIndex.DIR_NAME, self._namespace))
+    try:
+      ns_dir = self._project_dir.open(
+        self._tr, (KindIndex.DIR_NAME, self._namespace))
+    except ValueError:
+      # If the namespace does not exist, there are no kinds there.
+      raise gen.Return(([], False))
+
     kinds = ns_dir.list(self._tr)
     populated_kinds = [
       kind for kind, populated in zip(
@@ -399,6 +424,79 @@ class KindIterator(object):
     # This query is reversed to increase the likelihood of getting a relevant
     # (not marked for GC) entry.
     iterator = IndexIterator(self._tr, self._tornado_fdb, kind_index,
+                             index_slice, fetch_limit=1, reverse=True,
+                             snapshot=True)
+    while True:
+      results, more_results = yield iterator.next_page()
+      if results:
+        raise gen.Return(True)
+
+      if not more_results:
+        raise gen.Return(False)
+
+
+class PropertyIterator(object):
+  """ Iterates over a list of indexed property names for a kind. """
+  PROPERTY_TYPES = (u'NULL', u'INT64', u'BOOLEAN', u'STRING', u'DOUBLE',
+                    u'POINT', u'USER', u'REFERENCE')
+
+  def __init__(self, tr, tornado_fdb, project_dir, namespace):
+    self._tr = tr
+    self._tornado_fdb = tornado_fdb
+    self._project_dir = project_dir
+    self._namespace = namespace
+    self._done = False
+
+  @gen.coroutine
+  def next_page(self):
+    if self._done:
+      raise gen.Return(([], False))
+
+    # TODO: This can be made async.
+    ns_dir = self._project_dir.open(
+      self._tr, (SinglePropIndex.DIR_NAME, self._namespace))
+    kinds = ns_dir.list(self._tr)
+    # TODO: Check if stat entities belong in kinds.
+    kind_dirs = [ns_dir.open(self._tr, (kind,)) for kind in kinds]
+    results = []
+    for kind, kind_dir in zip(kinds, kind_dirs):
+      # TODO: This can be made async.
+      prop_names = kind_dir.list(self._tr)
+      for prop_name in prop_names:
+        prop_dir = kind_dir.open(self._tr, (prop_name,))
+        index = SinglePropIndex(prop_dir)
+        populated_map = yield [self._populated(index, type_name)
+                               for type_name in self.PROPERTY_TYPES]
+        populated_types = tuple(
+          type_ for type_, populated in zip(self.PROPERTY_TYPES, populated_map)
+          if populated)
+        if not populated_types:
+          continue
+
+        project_id = self._project_dir.get_path()[-1]
+        path = (u'__kind__', kind, u'__property__', prop_name)
+        prop_values = []
+        for prop_type in populated_types:
+          prop_value = entity_pb.PropertyValue()
+          prop_value.set_stringvalue(prop_type)
+          prop_values.append(prop_value)
+
+        # TODO: Consider giving metadata results their own entry class.
+        entry = CompositeEntry(
+          project_id, self._namespace, path,
+          [(u'property_representation', prop_values)], None, None)
+        results.append(entry)
+
+    self._done = True
+    raise gen.Return((results, False))
+
+  @gen.coroutine
+  def _populated(self, prop_index, type_name):
+    """ Checks if at least one entity exists for a given type name. """
+    index_slice = prop_index.type_range(type_name)
+    # This query is reversed to increase the likelihood of getting a relevant
+    # (not marked for GC) entry.
+    iterator = IndexIterator(self._tr, self._tornado_fdb, prop_index,
                              index_slice, fetch_limit=1, reverse=True,
                              snapshot=True)
     while True:
@@ -949,6 +1047,38 @@ class SinglePropIndex(Index):
     return PropertyEntry(self.project_id, self.namespace, path, self.prop_name,
                          value, commit_versionstamp, deleted_versionstamp)
 
+  def type_range(self, type_name):
+    """ Returns a slice that encompasses all values for a property type. """
+    if type_name == u'NULL':
+      start = six.int2byte(codecs.NULL_CODE)
+      stop = six.int2byte(codecs.NULL_CODE + 1)
+    elif type_name == u'INT64':
+      start = six.int2byte(codecs.MIN_INT64_CODE)
+      stop = six.int2byte(codecs.MAX_INT64_CODE + 1)
+    elif type_name == u'BOOLEAN':
+      start = six.int2byte(codecs.FALSE_CODE)
+      stop = six.int2byte(codecs.TRUE_CODE + 1)
+    elif type_name == u'STRING':
+      start = six.int2byte(codecs.BYTES_CODE)
+      stop = six.int2byte(codecs.BYTES_CODE + 1)
+    elif type_name == u'DOUBLE':
+      start = six.int2byte(codecs.DOUBLE_CODE)
+      stop = six.int2byte(codecs.DOUBLE_CODE + 1)
+    elif type_name == u'POINT':
+      start = six.int2byte(codecs.POINT_CODE)
+      stop = six.int2byte(codecs.POINT_CODE + 1)
+    elif type_name == u'USER':
+      start = six.int2byte(codecs.USER_CODE)
+      stop = six.int2byte(codecs.USER_CODE + 1)
+    elif type_name == u'REFERENCE':
+      start = six.int2byte(codecs.REFERENCE_CODE)
+      stop = six.int2byte(codecs.REFERENCE_CODE + 1)
+    else:
+      raise InternalError(u'Unknown type name')
+
+    return slice(self.directory.rawPrefix + start,
+                 self.directory.rawPrefix + stop)
+
 
 class CompositeIndex(Index):
   """
@@ -1086,26 +1216,31 @@ class IndexManager(object):
 
   @gen.coroutine
   def put_entries(self, tr, old_version_entry, new_entity):
+    old_key_stats = IndexStatsSummary()
     if old_version_entry.has_entity:
-      keys = yield self._get_index_keys(
+      old_keys, old_key_stats = yield self._get_index_keys(
         tr, old_version_entry.decoded, old_version_entry.commit_versionstamp)
-      for key in keys:
+      for key in old_keys:
         # Set deleted versionstamp.
         tr.set_versionstamped_value(
           key, b'\x00' * VERSIONSTAMP_SIZE + encode_versionstamp_index(0))
 
+    new_key_stats = IndexStatsSummary()
     if new_entity is not None:
-      keys = yield self._get_index_keys(tr, new_entity)
-      for key in keys:
+      new_keys, new_key_stats = yield self._get_index_keys(
+        tr, new_entity)
+      for key in new_keys:
         tr.set_versionstamped_key(key, b'')
+
+    raise gen.Return(new_key_stats - old_key_stats)
 
   @gen.coroutine
   def hard_delete_entries(self, tr, version_entry):
     if not version_entry.has_entity:
       return
 
-    keys = yield self._get_index_keys(
-      tr, version_entry.decoded, version_entry.commit_versionstamp)
+    keys = (yield self._get_index_keys(tr, version_entry.decoded,
+                                       version_entry.commit_versionstamp))[0]
     for key in keys:
       del tr[key]
 
@@ -1166,11 +1301,15 @@ class IndexManager(object):
 
     if query.has_kind() and query.kind() == u'__namespace__':
       project_dir = yield self._directory_cache.get(tr, (project_id,))
-      raise gen.Return(NamespaceIterator(tr, project_dir))
+      raise gen.Return(NamespaceIterator(tr, self._tornado_fdb, project_dir))
     elif query.has_kind() and query.kind() == u'__kind__':
       project_dir = yield self._directory_cache.get(tr, (project_id,))
       raise gen.Return(KindIterator(tr, self._tornado_fdb, project_dir,
                                     namespace))
+    elif query.has_kind() and query.kind() == u'__property__':
+      project_dir = yield self._directory_cache.get(tr, (project_id,))
+      raise gen.Return(PropertyIterator(tr, self._tornado_fdb, project_dir,
+                                        namespace))
 
     index = yield self._get_perfect_index(tr, query)
     reverse = get_scan_direction(query, index) == Query_Order.DESCENDING
@@ -1242,26 +1381,32 @@ class IndexManager(object):
 
   @gen.coroutine
   def _get_index_keys(self, tr, entity, commit_versionstamp=None):
+    has_index = commit_versionstamp is None
     project_id = decode_str(entity.key().app())
     namespace = decode_str(entity.key().name_space())
     path = Path.flatten(entity.key().path())
     kind = path[-2]
 
+    stats = IndexStatsSummary()
     kindless_index = yield self._kindless_index(tr, project_id, namespace)
     kind_index = yield self._kind_index(tr, project_id, namespace, kind)
     composite_indexes = yield self._get_indexes(
       tr, project_id, namespace, kind)
 
-    all_keys = [kindless_index.encode_key(path, commit_versionstamp),
-                kind_index.encode_key(path, commit_versionstamp)]
+    kindless_key = kindless_index.encode_key(path, commit_versionstamp)
+    kind_key = kind_index.encode_key(path, commit_versionstamp)
+    stats.add_kindless_key(kindless_key, has_index)
+    stats.add_kind_key(kind_key, has_index)
+    all_keys = [kindless_key, kind_key]
     entity_prop_names = []
     for prop in entity.property_list():
       prop_name = decode_str(prop.name())
       entity_prop_names.append(prop_name)
       index = yield self._single_prop_index(
         tr, project_id, namespace, kind, prop_name)
-      all_keys.append(
-        index.encode_key(prop.value(), path, commit_versionstamp))
+      prop_key = index.encode_key(prop.value(), path, commit_versionstamp)
+      stats.add_prop_key(prop, prop_key, has_index)
+      all_keys.append(prop_key)
 
     scatter_val = get_scatter_val(path)
     if scatter_val is not None:
@@ -1270,14 +1415,17 @@ class IndexManager(object):
       all_keys.append(index.encode_key(scatter_val, path, commit_versionstamp))
 
     for index in composite_indexes:
+      # If the entity does not have the relevant props for the index, skip it.
       if not all(index_prop_name in entity_prop_names
                  for index_prop_name in index.prop_names):
         continue
 
-      all_keys.extend(
-        index.encode_keys(entity.property_list(), path, commit_versionstamp))
+      composite_keys = index.encode_keys(entity.property_list(), path,
+                                         commit_versionstamp)
+      stats.add_composite_keys(index.id, composite_keys, has_index)
+      all_keys.extend(composite_keys)
 
-    raise gen.Return(all_keys)
+    raise gen.Return((all_keys, stats))
 
   @gen.coroutine
   def _get_perfect_index(self, tr, query):
