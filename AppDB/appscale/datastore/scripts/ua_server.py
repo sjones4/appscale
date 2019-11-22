@@ -21,7 +21,6 @@ from tornado import gen
 from appscale.common import appscale_info, retrying
 from appscale.common.constants import (
   LOG_FORMAT, UA_SERVERS_NODE, ZK_PERSISTENT_RECONNECTS)
-from appscale.datastore import appscale_datastore
 from appscale.datastore.dbconstants import (
   AppScaleDBConnectionError, USERS_SCHEMA, USERS_TABLE
 )
