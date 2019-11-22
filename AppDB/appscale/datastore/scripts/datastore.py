@@ -26,6 +26,7 @@ from appscale.common.constants import (
 from appscale.common.datastore_index import DatastoreIndex
 from appscale.common.unpackaged import APPSCALE_PYTHON_APPSERVER
 from appscale.datastore.fdb.codecs import Path
+from appscale.datastore.fdb.fdb_datastore import FDBDatastore
 from kazoo.client import KazooState
 from kazoo.exceptions import NodeExistsError, NoNodeError
 from tornado import gen
@@ -33,14 +34,9 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 from tornado.options import options
 from .. import dbconstants
-from ..appscale_datastore_batch import DatastoreFactory
-from ..datastore_distributed import DatastoreDistributed
-from ..index_manager import IndexManager
 from ..utils import (clean_app_id,
                      logger,
                      UnprocessedQueryResult)
-from ..zkappscale import zktransaction
-from ..zkappscale.transaction_manager import TransactionManager
 
 sys.path.append(APPSCALE_PYTHON_APPSERVER)
 from google.appengine.api import api_base_pb
@@ -51,7 +47,7 @@ from google.appengine.datastore import entity_pb
 from google.appengine.ext.remote_api import remote_api_pb
 from google.net.proto.ProtocolBuffer import ProtocolBufferDecodeError
 
-# Global for accessing the datastore. An instance of DatastoreDistributed.
+# Global for accessing the datastore.
 datastore_access = None
 
 # A record of active datastore servers.
@@ -934,32 +930,19 @@ def main():
     command_retry=retry_policy)
   zk_client.start()
 
-  if args.type == 'cassandra':
-    datastore_batch = DatastoreFactory.getDatastore(
-      args.type, log_level=logger.getEffectiveLevel())
-    zookeeper = zktransaction.ZKTransaction(
-      zk_client=zk_client, db_access=datastore_batch,
-      log_level=logger.getEffectiveLevel())
-    transaction_manager = TransactionManager(zk_client)
-    datastore_access = DatastoreDistributed(
-      datastore_batch, transaction_manager, zookeeper=zookeeper,
-      log_level=logger.getEffectiveLevel(),
-      taskqueue_locations=taskqueue_locations)
-  else:
-    from appscale.datastore.fdb.fdb_datastore import FDBDatastore
-    clusterfile_path = args.fdb_clusterfile
-    if not clusterfile_path:
-      try:
-        clusterfile_content = zk_client.get(FDB_CLUSTERFILE_NODE)[0]
-        clusterfile_path = '/run/appscale/appscale-datastore-fdb.cluster'
-        with open(clusterfile_path, 'w') as clusterfile:
-          clusterfile.write(clusterfile_content)
-      except NoNodeError:
-        logger.warning(
-          'Neither --fdb-clusterfile was specified nor {} ZK node exists,'
-          'FDB client will try to find clusterfile in one of default locations'
-          .format(FDB_CLUSTERFILE_NODE)
-        )
+  clusterfile_path = args.fdb_clusterfile
+  if not clusterfile_path:
+    try:
+      clusterfile_content = zk_client.get(FDB_CLUSTERFILE_NODE)[0]
+      clusterfile_path = '/run/appscale/appscale-datastore-fdb.cluster'
+      with open(clusterfile_path, 'w') as clusterfile:
+        clusterfile.write(clusterfile_content)
+    except NoNodeError:
+      logger.warning(
+        'Neither --fdb-clusterfile was specified nor {} ZK node exists,'
+        'FDB client will try to find clusterfile in one of default locations'
+        .format(FDB_CLUSTERFILE_NODE)
+      )
     datastore_access = FDBDatastore()
     datastore_access.start(clusterfile_path)
 
@@ -969,11 +952,6 @@ def main():
   # server node gets created.
   zk_state_listener(zk_client.state)
   zk_client.ChildrenWatch(DATASTORE_SERVERS_NODE, update_servers_watch)
-
-  if args.type == 'cassandra':
-    index_manager = IndexManager(zk_client, datastore_access,
-                                 perform_admin=True)
-    datastore_access.index_manager = index_manager
 
   server = tornado.httpserver.HTTPServer(pb_application)
   server.listen(args.port)
