@@ -3139,6 +3139,12 @@ class Djinn
       pick_zookeeper(@zookeeper_data)
       set_custom_config
       start_log_server
+      if @options.key?('postgres_dsn')
+        ZKInterface.set_postgres_dsn(@options['postgres_dsn'])
+      end
+      if @options.key?('fdb_clusterfile_content')
+        ZKInterface.set_fdb_clusterfile_content(@options['fdb_clusterfile_content'])
+      end
     else
       stop_log_server
     end
@@ -3518,7 +3524,6 @@ class Djinn
 
     backend = 'cassandra'
     if @options.key?('fdb_clusterfile_content')
-      ZKInterface.set_fdb_clusterfile_content(@options['fdb_clusterfile_content'])
       backend = 'fdb'
     end
 
