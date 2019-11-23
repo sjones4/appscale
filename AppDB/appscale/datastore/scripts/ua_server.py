@@ -718,6 +718,9 @@ def set_capabilities(username, capabilities, secret):
       )
       user_result = pg_cursor.fetchone()
 
+  if user_result:
+    raise gen.Return("true")
+  raise gen.Return('Error: User {} does not exist'.format(username))
 
 def usage():
   print "args: --apps or -a for the application location"
