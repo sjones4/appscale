@@ -428,14 +428,8 @@ class MainHandler(tornado.web.RequestHandler):
     clone_qr_pb = UnprocessedQueryResult()
     try:
       yield datastore_access._dynamic_run_query(query, clone_qr_pb)
-    except dbconstants.InternalError as error:
-      raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
     except dbconstants.BadRequest as error:
       raise gen.Return( ('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except dbconstants.ConcurrentModificationException as error:
-      logger.exception('Concurrent transaction during {}'.format(query))
-      raise gen.Return(
-        ('', datastore_pb.Error.CONCURRENT_TRANSACTION, str(error)))
     except dbconstants.AppScaleDBConnectionError as error:
       logger.exception('DB connection error during query')
       raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
@@ -691,10 +685,6 @@ class MainHandler(tornado.web.RequestHandler):
       raise gen.Return(('', datastore_pb.Error.TIMEOUT, str(error)))
     except dbconstants.BadRequest as error:
       raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except dbconstants.ConcurrentModificationException as error:
-      logger.exception('Concurrent transaction during {}'.format(putreq_pb))
-      raise gen.Return(
-        ('', datastore_pb.Error.CONCURRENT_TRANSACTION, str(error)))
 
   @gen.coroutine
   def get_request(self, app_id, http_request_data):
@@ -711,16 +701,6 @@ class MainHandler(tornado.web.RequestHandler):
     getresp_pb = datastore_pb.GetResponse()
     try:
       yield datastore_access.dynamic_get(app_id, getreq_pb, getresp_pb)
-    except dbconstants.BadRequest as error:
-      logger.exception('Illegal argument during {}'.format(getreq_pb))
-      raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except dbconstants.InternalError as error:
-      logger.exception('InternalError during {}'.format(getreq_pb))
-      raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
-    except dbconstants.ConcurrentModificationException as error:
-      logger.exception('Concurrent transaction during {}'.format(getreq_pb))
-      raise gen.Return(
-        ('', datastore_pb.Error.CONCURRENT_TRANSACTION, str(error)))
     except dbconstants.AppScaleDBConnectionError:
       logger.exception('DB connection error during get')
       raise gen.Return(
@@ -760,11 +740,6 @@ class MainHandler(tornado.web.RequestHandler):
       raise gen.Return(('', datastore_pb.Error.TIMEOUT, str(error)))
     except dbconstants.BadRequest as error:
       raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except dbconstants.ConcurrentModificationException:
-      logger.exception('Concurrent transaction during {}'.format(delreq_pb))
-      raise gen.Return(
-        ('', datastore_pb.Error.CONCURRENT_TRANSACTION,
-         'Concurrent transaction exception on delete.'))
     except dbconstants.AppScaleDBConnectionError:
       logger.exception('DB connection error during delete')
       raise gen.Return(
