@@ -929,8 +929,8 @@ def main():
         'FDB client will try to find clusterfile in one of default locations'
         .format(FDB_CLUSTERFILE_NODE)
       )
-    datastore_access = FDBDatastore()
-    datastore_access.start(clusterfile_path)
+  datastore_access = FDBDatastore()
+  datastore_access.start(clusterfile_path)
 
   zk_client.add_listener(zk_state_listener)
   zk_client.ensure_path(DATASTORE_SERVERS_NODE)
