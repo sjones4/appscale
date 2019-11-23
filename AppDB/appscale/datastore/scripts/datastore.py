@@ -329,8 +329,7 @@ class MainHandler(tornado.web.RequestHandler):
       raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
     except dbconstants.BadRequest as error:
       raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except (zktransaction.ZKInternalException,
-            dbconstants.AppScaleDBConnectionError) as error:
+    except dbconstants.AppScaleDBConnectionError as error:
       logger.exception('Unable to begin transaction')
       raise gen.Return(
         ('', datastore_pb.Error.INTERNAL_ERROR,
@@ -429,16 +428,11 @@ class MainHandler(tornado.web.RequestHandler):
     clone_qr_pb = UnprocessedQueryResult()
     try:
       yield datastore_access._dynamic_run_query(query, clone_qr_pb)
+    except dbconstants.InternalError as error:
+      raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
     except dbconstants.BadRequest as error:
       raise gen.Return( ('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except zktransaction.ZKBadRequest as error:
-      logger.exception(
-        'Illegal arguments in transaction during {}'.format(query))
-      raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except zktransaction.ZKInternalException as error:
-      logger.exception('ZKInternalException during {}'.format(query))
-      raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
-    except zktransaction.ZKTransactionException as error:
+    except dbconstants.ConcurrentModificationException as error:
       logger.exception('Concurrent transaction during {}'.format(query))
       raise gen.Return(
         ('', datastore_pb.Error.CONCURRENT_TRANSACTION, str(error)))
@@ -690,14 +684,14 @@ class MainHandler(tornado.web.RequestHandler):
     try:
       yield datastore_access.dynamic_put(app_id, putreq_pb, putresp_pb)
       raise gen.Return((putresp_pb.Encode(), 0, ''))
-    except (dbconstants.InternalError, zktransaction.ZKInternalException,
+    except (dbconstants.InternalError,
             dbconstants.AppScaleDBConnectionError) as error:
       raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
     except dbconstants.Timeout as error:
       raise gen.Return(('', datastore_pb.Error.TIMEOUT, str(error)))
-    except (dbconstants.BadRequest, zktransaction.ZKBadRequest) as error:
+    except dbconstants.BadRequest as error:
       raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except zktransaction.ZKTransactionException as error:
+    except dbconstants.ConcurrentModificationException as error:
       logger.exception('Concurrent transaction during {}'.format(putreq_pb))
       raise gen.Return(
         ('', datastore_pb.Error.CONCURRENT_TRANSACTION, str(error)))
@@ -717,13 +711,13 @@ class MainHandler(tornado.web.RequestHandler):
     getresp_pb = datastore_pb.GetResponse()
     try:
       yield datastore_access.dynamic_get(app_id, getreq_pb, getresp_pb)
-    except zktransaction.ZKBadRequest as error:
+    except dbconstants.BadRequest as error:
       logger.exception('Illegal argument during {}'.format(getreq_pb))
       raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except zktransaction.ZKInternalException as error:
-      logger.exception('ZKInternalException during {}'.format(getreq_pb))
+    except dbconstants.InternalError as error:
+      logger.exception('InternalError during {}'.format(getreq_pb))
       raise gen.Return(('', datastore_pb.Error.INTERNAL_ERROR, str(error)))
-    except zktransaction.ZKTransactionException as error:
+    except dbconstants.ConcurrentModificationException as error:
       logger.exception('Concurrent transaction during {}'.format(getreq_pb))
       raise gen.Return(
         ('', datastore_pb.Error.CONCURRENT_TRANSACTION, str(error)))
@@ -766,15 +760,7 @@ class MainHandler(tornado.web.RequestHandler):
       raise gen.Return(('', datastore_pb.Error.TIMEOUT, str(error)))
     except dbconstants.BadRequest as error:
       raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except zktransaction.ZKBadRequest as error:
-      logger.exception('Illegal argument during {}'.format(delreq_pb))
-      raise gen.Return(('', datastore_pb.Error.BAD_REQUEST, str(error)))
-    except zktransaction.ZKInternalException:
-      logger.exception('ZKInternalException during {}'.format(delreq_pb))
-      raise gen.Return(
-        ('', datastore_pb.Error.INTERNAL_ERROR,
-         'Internal error with ZooKeeper connection.'))
-    except zktransaction.ZKTransactionException:
+    except dbconstants.ConcurrentModificationException:
       logger.exception('Concurrent transaction during {}'.format(delreq_pb))
       raise gen.Return(
         ('', datastore_pb.Error.CONCURRENT_TRANSACTION,
