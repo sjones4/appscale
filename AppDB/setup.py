@@ -11,6 +11,7 @@ setup(
   platforms='Posix',
   install_requires=[
     'appscale-common',
+    'cassandra-driver<3.18.0',
     'kazoo',
     'monotonic',
     'mmh3',
