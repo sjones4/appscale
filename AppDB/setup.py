@@ -32,7 +32,8 @@ setup(
             'appscale.datastore',
             'appscale.datastore.fdb',
             'appscale.datastore.fdb.stats',
-            'appscale.datastore.scripts'],
+            'appscale.datastore.scripts',
+            'appscale.datastore.zkappscale'],
   entry_points={'console_scripts': [
     'appscale-blobstore-server=appscale.datastore.scripts.blobstore:main',
     'appscale-datastore=appscale.datastore.scripts.datastore:main',
