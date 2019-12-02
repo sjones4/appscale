@@ -377,7 +377,12 @@ class FDBDatastore(object):
     if old_entries:
       self._gc.clear_later(old_entries, versionstamp_future.wait().value)
 
-    mutations = [(old_entry, new_entry, index_stats)
+    def version_to_none(entry):
+      if type(entry) == int:
+        return None
+      return entry
+
+    mutations = [(old_entry, version_to_none(new_entry), index_stats)
                  for old_entry, new_entry, index_stats in writes
                  if index_stats is not None]
     IOLoop.current().spawn_callback(self._stats_buffer.update, project_id,
