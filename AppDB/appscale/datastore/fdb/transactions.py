@@ -144,7 +144,12 @@ class TransactionMetadata(object):
     lookups = set()
     mutations = []
     for chunks in six.itervalues(lookup_rpcs):
-      lookups.update(self._unpack_keys(b''.join(chunks)))
+      lookup_rpc_keys = self._unpack_keys(b''.join(chunks))
+      try:
+        lookups.update(lookup_rpc_keys)
+      except TypeError as e:
+        logger.info("Type error for: " + str(lookup_rpc_keys))
+        raise e
 
     for rpc_info in mutation_rpcs:
       rpc_type = rpc_info[0]
