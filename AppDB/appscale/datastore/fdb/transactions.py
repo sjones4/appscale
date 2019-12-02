@@ -148,7 +148,7 @@ class TransactionMetadata(object):
       try:
         lookups.update(lookup_rpc_keys)
       except TypeError as e:
-        logger.info("Type error for: " + str(lookup_rpc_keys))
+        logger.info("Type error for: " + (', '.join(lookup_rpc_keys)))
         raise e
 
     for rpc_info in mutation_rpcs:
